@@ -10,11 +10,16 @@ import {
   IconButton,
   Collapse,
   CircularProgress,
+  Tooltip,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PhoneIcon from '@mui/icons-material/Phone';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import EditIcon from '@mui/icons-material/Edit';
 import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
+import { useAuth } from '../Auth/AuthContext';
+import { CreateOrderDialog } from './CreateOrderDialog';
 import { Order, OrderStatus } from '../../types';
 
 interface OrderCardProps {
@@ -70,10 +75,18 @@ const formatCurrency = (value?: string): string => {
   return isNaN(num) ? value : num.toFixed(2);
 };
 
+// Helper to check if order is unassigned
+const isUnassigned = (employee?: string): boolean => {
+  return !employee || employee.trim() === '' || employee.trim().toLowerCase() === 'n/a';
+};
+
 export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
+  const { user } = useAuth();
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   // Editable fields state
   const [tracking, setTracking] = useState(order.tracking || '');
@@ -87,9 +100,29 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
   const [notes, setNotes] = useState(order.notes || '');
 
   const statusColor = getStatusColor(order.status, order.dueDate);
-  const employeeDisplay = order.employee
-    ? order.employee.replace('@pardical.com', '')
-    : 'Unassigned';
+  const unassigned = isUnassigned(order.employee);
+  const employeeDisplay = unassigned
+    ? 'n/a'
+    : order.employee!.replace('@pardical.com', '');
+
+  const handleClaimTicket = async () => {
+    if (!user?.displayName) {
+      alert('Unable to claim ticket: User name not available');
+      return;
+    }
+    setIsClaiming(true);
+    try {
+      const orderRef = doc(db, 'orders', order.id);
+      await updateDoc(orderRef, {
+        employee: user.displayName,
+      });
+    } catch (error) {
+      console.error('Error claiming ticket:', error);
+      alert('Failed to claim ticket. Please try again.');
+    } finally {
+      setIsClaiming(false);
+    }
+  };
 
   const handleUpdate = async () => {
     setIsUpdating(true);
@@ -185,19 +218,52 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography
-            sx={{
-              color: '#22c55e',
-              fontSize: '12px',
-              fontWeight: 500,
-              backgroundColor: 'rgba(34, 197, 94, 0.1)',
-              px: 1,
-              py: 0.5,
-              borderRadius: '4px',
-            }}
-          >
-            {employeeDisplay}
-          </Typography>
+          {unassigned ? (
+            <Tooltip title="Click to take this ticket">
+              <Box
+                onClick={handleClaimTicket}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  color: '#71717a',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  backgroundColor: 'rgba(113, 113, 122, 0.1)',
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  '&:hover': {
+                    backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                    color: '#22c55e',
+                  },
+                }}
+              >
+                {isClaiming ? (
+                  <CircularProgress size={12} sx={{ color: 'inherit' }} />
+                ) : (
+                  <PersonAddIcon sx={{ fontSize: 14 }} />
+                )}
+                <span>{isClaiming ? 'Claiming...' : 'n/a'}</span>
+              </Box>
+            </Tooltip>
+          ) : (
+            <Typography
+              sx={{
+                color: '#22c55e',
+                fontSize: '12px',
+                fontWeight: 500,
+                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                px: 1,
+                py: 0.5,
+                borderRadius: '4px',
+              }}
+            >
+              {employeeDisplay}
+            </Typography>
+          )}
           {order.dueDate && (
             <Typography sx={{ color: '#71717a', fontSize: '11px' }}>
               Ship By: {formatDate(order.dueDate)}
@@ -415,6 +481,25 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
             {isDeleting ? <CircularProgress size={16} /> : 'DELETE'}
           </Button>
           <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setEditDialogOpen(true)}
+            startIcon={<EditIcon sx={{ fontSize: 14 }} />}
+            sx={{
+              fontSize: '11px',
+              fontWeight: 600,
+              minWidth: 70,
+              borderColor: '#52525b',
+              color: '#a1a1aa',
+              '&:hover': {
+                borderColor: '#71717a',
+                backgroundColor: 'rgba(113, 113, 122, 0.1)',
+              },
+            }}
+          >
+            EDIT
+          </Button>
+          <Button
             variant="contained"
             color="primary"
             size="small"
@@ -449,6 +534,12 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
           </Select>
         </Box>
       </Box>
+
+      <CreateOrderDialog
+        open={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        order={order}
+      />
     </Card>
   );
 };

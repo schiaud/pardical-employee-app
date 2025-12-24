@@ -6,9 +6,9 @@ import {
   CircularProgress,
   Alert,
   Button,
-  ButtonGroup,
   Badge,
 } from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
 import {
   collection,
   query,
@@ -22,6 +22,7 @@ import {
 import { db } from '../../services/firebase';
 import { Order } from '../../types';
 import { OrderCard } from './OrderCard';
+import { CreateOrderDialog } from './CreateOrderDialog';
 import { useAuth } from '../Auth/AuthContext';
 
 type FilterType = 'new' | 'notShipped' | 'returns' | 'all60Days' | 'all' | 'myOrders';
@@ -31,6 +32,7 @@ export const OrderList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>('notShipped');
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [counts, setCounts] = useState<Record<FilterType, number>>({
     new: 0,
     notShipped: 0,
@@ -182,17 +184,31 @@ export const OrderList: React.FC = () => {
   return (
     <Container maxWidth={false} disableGutters sx={{ mt: 2.5, mb: 4, px: 3 }}>
       <Box sx={{ mb: 2.5 }}>
-        <Typography
-          variant="h4"
-          sx={{
-            fontWeight: 700,
-            color: '#fff',
-            fontSize: '24px',
-            mb: 2,
-          }}
-        >
-          Orders
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          <Typography
+            variant="h4"
+            sx={{
+              fontWeight: 700,
+              color: '#fff',
+              fontSize: '24px',
+            }}
+          >
+            Orders
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setCreateDialogOpen(true)}
+            sx={{
+              backgroundColor: '#22c55e',
+              '&:hover': { backgroundColor: '#16a34a' },
+              fontWeight: 600,
+              fontSize: '13px',
+            }}
+          >
+            Create New Order
+          </Button>
+        </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1.5 }}>
           {filterButtons.map(({ key, label }) => (
@@ -255,6 +271,11 @@ export const OrderList: React.FC = () => {
       ) : (
         orders.map((order) => <OrderCard key={order.id} order={order} />)
       )}
+
+      <CreateOrderDialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+      />
     </Container>
   );
 };
