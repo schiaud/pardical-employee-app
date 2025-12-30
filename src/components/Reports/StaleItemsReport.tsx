@@ -51,6 +51,7 @@ import {
   CarPartVariant,
   VehicleInfo,
 } from '../../types/staleItems';
+import ItemSalesDetail from './ItemSalesDetail';
 
 export const StaleItemsReport: React.FC = () => {
   const [items, setItems] = useState<ItemStats[]>([]);
@@ -437,59 +438,7 @@ export const StaleItemsReport: React.FC = () => {
                           timeout="auto"
                           unmountOnExit
                         >
-                          <Box sx={{ py: 2, px: 4 }}>
-                            <Typography variant="subtitle2" gutterBottom>
-                              Full Item Name:
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary" paragraph>
-                              {item.itemName}
-                            </Typography>
-
-                            {item.vehicleInfo && (
-                              <>
-                                <Typography variant="subtitle2" gutterBottom>
-                                  Saved Vehicle Info:
-                                </Typography>
-                                <Typography variant="body2" color="text.secondary" paragraph>
-                                  {item.vehicleInfo.year} {item.vehicleInfo.make}{' '}
-                                  {item.vehicleInfo.model} - {item.vehicleInfo.part}
-                                  {item.vehicleInfo.variantLabel &&
-                                    ` (${item.vehicleInfo.variantLabel})`}
-                                </Typography>
-                              </>
-                            )}
-
-                            {item.pricingData && (
-                              <>
-                                <Typography variant="subtitle2" gutterBottom>
-                                  Pricing Details:
-                                </Typography>
-                                <Box display="flex" gap={2}>
-                                  <Typography variant="body2">
-                                    Avg: ${item.pricingData.avgPrice.toFixed(2)}
-                                  </Typography>
-                                  <Typography variant="body2">
-                                    Min: ${item.pricingData.minPrice.toFixed(2)}
-                                  </Typography>
-                                  <Typography variant="body2">
-                                    Max: ${item.pricingData.maxPrice.toFixed(2)}
-                                  </Typography>
-                                  <Typography variant="body2">
-                                    Listings: {item.pricingData.totalListings}
-                                  </Typography>
-                                </Box>
-                                <Typography
-                                  variant="caption"
-                                  color="text.secondary"
-                                  display="block"
-                                  mt={1}
-                                >
-                                  Last updated:{' '}
-                                  {item.pricingData.lastUpdated.toLocaleDateString()}
-                                </Typography>
-                              </>
-                            )}
-                          </Box>
+                          <ItemSalesDetail item={item} />
                         </Collapse>
                       </TableCell>
                     </TableRow>
