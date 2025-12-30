@@ -8,6 +8,7 @@ import { Layout } from './components/Layout/Layout';
 import { OrderList } from './components/Orders/OrderList';
 import { EmployeeReport } from './components/Reports/EmployeeReport';
 import { ItemReport } from './components/Reports/ItemReport';
+import { StaleItemsReport } from './components/Reports/StaleItemsReport';
 import { CustomerList } from './components/Customers/CustomerList';
 
 const theme = createTheme({
@@ -97,6 +98,7 @@ function App() {
               <Route index element={<OrderList />} />
               <Route path="reports/employees" element={<EmployeeReport />} />
               <Route path="reports/items" element={<ItemReport />} />
+              <Route path="reports/stale" element={<StaleItemsReport />} />
               <Route path="customers" element={<CustomerList />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -84,3 +84,6 @@ export interface Customer {
   firstOrderDate: string;
   lastOrderDate: string;
 }
+
+// Re-export stale items types
+export * from './staleItems';

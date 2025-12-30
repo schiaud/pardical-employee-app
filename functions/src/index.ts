@@ -4,6 +4,23 @@ import * as logger from "firebase-functions/logger";
 
 admin.initializeApp();
 
+// Item Stats functions
+export {
+  updateItemStatsOnOrder,
+  calculateDailyStaleMetrics,
+  migrateOrdersToItemStats,
+} from "./itemStats";
+
+// Car-Part.com scraper functions
+export {
+  checkCarPartVariants,
+  fetchCarPartPricing,
+  updateItemPricing,
+} from "./carPartScraper";
+
+// eBay import functions
+export {importEbayData} from "./ebayImport";
+
 /**
  * eBay Webhook Handler
  * Receives platform notifications from eBay when events occur

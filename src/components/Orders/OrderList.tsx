@@ -23,6 +23,7 @@ import { db } from '../../services/firebase';
 import { Order } from '../../types';
 import { OrderCard } from './OrderCard';
 import { CreateOrderDialog } from './CreateOrderDialog';
+import { StaleItemsWidget } from './StaleItemsWidget';
 import { useAuth } from '../Auth/AuthContext';
 
 type FilterType = 'new' | 'notShipped' | 'returns' | 'all60Days' | 'all' | 'myOrders';
@@ -256,6 +257,8 @@ export const OrderList: React.FC = () => {
           Showing {orders.length} orders
         </Typography>
       </Box>
+
+      <StaleItemsWidget />
 
       {orders.length === 0 ? (
         <Alert
