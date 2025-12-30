@@ -1,7 +1,7 @@
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import {onCall, HttpsError} from "firebase-functions/v2/https";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 
 const db = admin.firestore();
 
@@ -19,7 +19,7 @@ interface EbayListing {
  * Parses the "Manage active listings" page HTML and updates itemStats
  */
 export const importEbayData = onCall(
-  {cors: true, timeoutSeconds: 120, memory: "512MiB"},
+  {cors: true, timeoutSeconds: 300, memory: "1GiB"},
   async (request) => {
     const {htmlContent} = request.data;
 
@@ -57,26 +57,7 @@ export const importEbayData = onCall(
       const now = admin.firestore.Timestamp.now();
       const matchedRefs = new Set<string>();
 
-      // First pass: Reset all items' eBay listing flag
-      for (const doc of itemStatsSnapshot.docs) {
-        batch.update(doc.ref, {
-          inEbayListings: false,
-          updatedAt: now,
-        });
-        batchCount++;
-        if (batchCount >= 450) {
-          await batch.commit();
-          batch = db.batch();
-          batchCount = 0;
-        }
-      }
-      if (batchCount > 0) {
-        await batch.commit();
-        batch = db.batch();
-        batchCount = 0;
-      }
-
-      // Second pass: Update matched items with eBay data
+      // Update matched items with eBay data (skip reset pass for performance)
       for (const listing of listings) {
         const normalizedTitle = normalizeForMatching(listing.title);
 
