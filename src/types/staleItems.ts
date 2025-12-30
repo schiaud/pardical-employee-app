@@ -42,6 +42,19 @@ export interface ItemStats {
   pricingData?: PricingData;
   ebayMetrics?: EbayMetrics;
   vehicleInfo?: VehicleInfo;
+  // Profit aggregates
+  totalRevenue?: number;
+  totalCost?: number;
+  totalProfit?: number;
+  avgProfitMargin?: number;
+  // Price history (last 10 checks)
+  priceHistory?: PriceHistoryEntry[];
+  // Sales by period for trends
+  salesByWeek?: Record<string, number>;
+  salesByMonth?: Record<string, number>;
+  // eBay listing flag (for filtering)
+  inEbayListings?: boolean;
+  ebayListingUpdatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -75,6 +88,19 @@ export interface ItemStatsFirestore {
     lastUpdated: Timestamp;
   };
   vehicleInfo?: VehicleInfo;
+  // Profit aggregates
+  totalRevenue?: number;
+  totalCost?: number;
+  totalProfit?: number;
+  avgProfitMargin?: number;
+  // Price history (last 10 checks)
+  priceHistory?: PriceHistoryEntryFirestore[];
+  // Sales by period for trends
+  salesByWeek?: Record<string, number>;
+  salesByMonth?: Record<string, number>;
+  // eBay listing flag
+  inEbayListings?: boolean;
+  ebayListingUpdatedAt?: Timestamp;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -108,4 +134,64 @@ export interface CarPartPricingResponse {
   metrics?: PricingData;
   variants?: CarPartVariant[];
   error?: string;
+}
+
+// NEW: Individual sale record (stored in subcollection)
+export interface SaleRecord {
+  id: string;
+  orderRef: string;
+  orderNumber?: string;
+  salePrice: number;
+  purchaseCost?: number;
+  shipCost?: number;
+  profit?: number;
+  profitMargin?: number;
+  marketPriceAtSale?: {
+    avgPrice: number;
+    minPrice: number;
+    maxPrice: number;
+    totalListings: number;
+    fetchedAt: Date;
+  };
+  saleDate: Date;
+  sku?: string;
+  createdAt: Date;
+}
+
+export interface SaleRecordFirestore {
+  id: string;
+  orderRef: string;
+  orderNumber?: string;
+  salePrice: number;
+  purchaseCost?: number;
+  shipCost?: number;
+  profit?: number;
+  profitMargin?: number;
+  marketPriceAtSale?: {
+    avgPrice: number;
+    minPrice: number;
+    maxPrice: number;
+    totalListings: number;
+    fetchedAt: Timestamp;
+  };
+  saleDate: Timestamp;
+  sku?: string;
+  createdAt: Timestamp;
+}
+
+// NEW: Price history entry
+export interface PriceHistoryEntry {
+  avgPrice: number;
+  minPrice: number;
+  maxPrice: number;
+  totalListings: number;
+  checkedAt: Date;
+}
+
+export interface PriceHistoryEntryFirestore {
+  avgPrice: number;
+  minPrice: number;
+  maxPrice: number;
+  totalListings: number;
+  checkedAt: Timestamp;
 }

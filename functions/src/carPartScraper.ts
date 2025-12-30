@@ -27,6 +27,68 @@ interface VariantOption {
   value: string;
 }
 
+interface ScrapeRequest {
+  year: string;
+  make: string;
+  model: string;
+  part: string;
+  variantValue?: string;
+  postalCode?: string;
+}
+
+interface ScrapeResponse {
+  success: boolean;
+  metrics?: PricingResult;
+  error?: string;
+}
+
+/**
+ * Internal function to scrape car-part.com pricing
+ * Used by scheduled functions and can be called directly
+ */
+export async function scrapeCarPartPricing(
+  request: ScrapeRequest
+): Promise<ScrapeResponse> {
+  const {year, make, model, part, variantValue, postalCode = "60018"} = request;
+  const makeModel = `${make} ${model}`;
+
+  try {
+    const listings = await searchCarPartCom(
+      year,
+      makeModel,
+      part,
+      postalCode,
+      variantValue
+    );
+
+    if (listings.length === 0) {
+      return {
+        success: true,
+        metrics: undefined,
+        error: "No listings found",
+      };
+    }
+
+    const metrics = calculateMetrics(listings);
+
+    return {
+      success: true,
+      metrics: {
+        avgPrice: metrics.avgPrice,
+        minPrice: metrics.minPrice,
+        maxPrice: metrics.maxPrice,
+        stdDev: metrics.stdDev,
+        totalListings: metrics.totalListings,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
 /**
  * Check available variants for a vehicle/part combination
  */

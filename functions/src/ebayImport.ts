@@ -52,9 +52,31 @@ export const importEbayData = onCall(
       });
 
       let matchedCount = 0;
-      const batch = db.batch();
+      let batch = db.batch();
+      let batchCount = 0;
       const now = admin.firestore.Timestamp.now();
+      const matchedRefs = new Set<string>();
 
+      // First pass: Reset all items' eBay listing flag
+      for (const doc of itemStatsSnapshot.docs) {
+        batch.update(doc.ref, {
+          inEbayListings: false,
+          updatedAt: now,
+        });
+        batchCount++;
+        if (batchCount >= 450) {
+          await batch.commit();
+          batch = db.batch();
+          batchCount = 0;
+        }
+      }
+      if (batchCount > 0) {
+        await batch.commit();
+        batch = db.batch();
+        batchCount = 0;
+      }
+
+      // Second pass: Update matched items with eBay data
       for (const listing of listings) {
         const normalizedTitle = normalizeForMatching(listing.title);
 
@@ -79,7 +101,8 @@ export const importEbayData = onCall(
           }
         }
 
-        if (matchedRef) {
+        if (matchedRef && !matchedRefs.has(matchedRef.id)) {
+          matchedRefs.add(matchedRef.id);
           batch.update(matchedRef, {
             ebayMetrics: {
               views30Day: listing.views30Day,
@@ -88,18 +111,23 @@ export const importEbayData = onCall(
               listingPrice: listing.listingPrice,
               lastUpdated: now,
             },
+            inEbayListings: true,
+            ebayListingUpdatedAt: now,
             updatedAt: now,
           });
           matchedCount++;
+          batchCount++;
         }
 
         // Commit in batches
-        if (matchedCount > 0 && matchedCount % 500 === 0) {
+        if (batchCount >= 450) {
           await batch.commit();
+          batch = db.batch();
+          batchCount = 0;
         }
       }
 
-      if (matchedCount % 500 !== 0) {
+      if (batchCount > 0) {
         await batch.commit();
       }
 
@@ -110,6 +138,7 @@ export const importEbayData = onCall(
         imported: matchedCount,
         totalParsed: listings.length,
         unmatchedCount: listings.length - matchedCount,
+        itemsInEbayListings: matchedCount,
       };
     } catch (error) {
       logger.error("Error importing eBay data:", error);

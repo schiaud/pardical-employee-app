@@ -9,6 +9,7 @@ export {
   updateItemStatsOnOrder,
   calculateDailyStaleMetrics,
   migrateOrdersToItemStats,
+  weeklyPriceCheck,
 } from "./itemStats";
 
 // Car-Part.com scraper functions

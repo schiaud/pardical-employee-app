@@ -21,6 +21,10 @@ import {
   CarPartPricingRequest,
   CarPartPricingResponse,
   StaleThreshold,
+  SaleRecord,
+  SaleRecordFirestore,
+  PriceHistoryEntry,
+  PriceHistoryEntryFirestore,
 } from '../types/staleItems';
 
 const ITEM_STATS_COLLECTION = 'itemStats';
@@ -42,6 +46,24 @@ const convertToItemStats = (data: ItemStatsFirestore): ItemStats => ({
     ? {
         ...data.ebayMetrics,
         lastUpdated: data.ebayMetrics.lastUpdated?.toDate?.() || new Date(),
+      }
+    : undefined,
+  priceHistory: data.priceHistory?.map((entry: PriceHistoryEntryFirestore) => ({
+    ...entry,
+    checkedAt: entry.checkedAt?.toDate?.() || new Date(),
+  })),
+  ebayListingUpdatedAt: data.ebayListingUpdatedAt?.toDate?.(),
+});
+
+// Convert sale record from Firestore
+const convertToSaleRecord = (data: SaleRecordFirestore): SaleRecord => ({
+  ...data,
+  saleDate: data.saleDate?.toDate?.() || new Date(),
+  createdAt: data.createdAt?.toDate?.() || new Date(),
+  marketPriceAtSale: data.marketPriceAtSale
+    ? {
+        ...data.marketPriceAtSale,
+        fetchedAt: data.marketPriceAtSale.fetchedAt?.toDate?.() || new Date(),
       }
     : undefined,
 });
@@ -276,13 +298,26 @@ export const formatDaysSinceLastSale = (days: number): string => {
 };
 
 // Run migration to populate itemStats from existing orders
-export const runMigration = async (): Promise<{ success: boolean; itemsCreated?: number; error?: string }> => {
+export const runMigration = async (): Promise<{
+  success: boolean;
+  itemsCreated?: number;
+  salesCreated?: number;
+  ordersProcessed?: number;
+  ordersSkipped?: number;
+  error?: string;
+}> => {
   try {
     const functions = getFunctions();
-    const migrate = httpsCallable<object, { success: boolean; itemsCreated: number }>(
-      functions,
-      'migrateOrdersToItemStats'
-    );
+    const migrate = httpsCallable<
+      object,
+      {
+        success: boolean;
+        itemsCreated: number;
+        salesCreated: number;
+        ordersProcessed: number;
+        ordersSkipped: number;
+      }
+    >(functions, 'migrateOrdersToItemStats');
     const result = await migrate({});
     return result.data;
   } catch (error) {
@@ -292,4 +327,75 @@ export const runMigration = async (): Promise<{ success: boolean; itemsCreated?:
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
+};
+
+// Get items that are currently in eBay listings
+export const getEbayListedItems = async (): Promise<ItemStats[]> => {
+  try {
+    const q = query(
+      collection(db, ITEM_STATS_COLLECTION),
+      where('inEbayListings', '==', true),
+      orderBy('daysSinceLastSale', 'desc')
+    );
+
+    const snapshot = await getDocs(q);
+    const items: ItemStats[] = [];
+
+    snapshot.forEach((docSnap) => {
+      try {
+        const data = docSnap.data() as ItemStatsFirestore;
+        items.push(convertToItemStats(data));
+      } catch (err) {
+        console.error('Error converting item stats:', err);
+      }
+    });
+
+    return items;
+  } catch (error) {
+    console.error('Error fetching eBay listed items:', error);
+    return [];
+  }
+};
+
+// Get sales records for a specific item
+export const getSalesForItem = async (itemId: string): Promise<SaleRecord[]> => {
+  try {
+    const salesRef = collection(db, ITEM_STATS_COLLECTION, itemId, 'sales');
+    const q = query(salesRef, orderBy('saleDate', 'desc'));
+    const snapshot = await getDocs(q);
+
+    const sales: SaleRecord[] = [];
+    snapshot.forEach((docSnap) => {
+      try {
+        const data = docSnap.data() as SaleRecordFirestore;
+        sales.push(convertToSaleRecord(data));
+      } catch (err) {
+        console.error('Error converting sale record:', err);
+      }
+    });
+
+    return sales;
+  } catch (error) {
+    console.error('Error fetching sales for item:', error);
+    return [];
+  }
+};
+
+// Get price history for a specific item
+export const getPriceHistory = async (itemId: string): Promise<PriceHistoryEntry[]> => {
+  const item = await getItemStatsById(itemId);
+  return item?.priceHistory || [];
+};
+
+// Format currency
+export const formatCurrency = (value: number): string => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(value);
+};
+
+// Format profit margin
+export const formatProfitMargin = (margin: number): string => {
+  return `${margin.toFixed(1)}%`;
 };
