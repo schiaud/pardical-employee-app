@@ -525,6 +525,118 @@ export const migrateOrdersToItemStats = onCall(
 );
 
 /**
+ * HTTP Callable: Backfill sales subcollection for a specific item
+ * Called when expanding an item that has sales but no subcollection data
+ */
+export const backfillSalesForItem = onCall(
+  {cors: true, timeoutSeconds: 60},
+  async (request) => {
+    const {itemId, itemName} = request.data as {
+      itemId: string;
+      itemName: string;
+    };
+
+    if (!itemId || !itemName) {
+      throw new Error("itemId and itemName are required");
+    }
+
+    logger.info(`Backfilling sales for item: ${itemName} (${itemId})`);
+
+    // Query orders that match this exact item name
+    const ordersSnapshot = await db
+      .collection("orders")
+      .where("item", "==", itemName)
+      .get();
+
+    if (ordersSnapshot.empty) {
+      logger.info(`No orders found for item: ${itemName}`);
+      return {success: true, salesCreated: 0, message: "No orders found"};
+    }
+
+    const itemStatsRef = db.collection("itemStats").doc(itemId);
+    const now = admin.firestore.Timestamp.now();
+
+    let batch = db.batch();
+    let batchCount = 0;
+    let salesCreated = 0;
+    let totalRevenue = 0;
+    let totalCost = 0;
+    let totalProfit = 0;
+
+    for (const orderDoc of ordersSnapshot.docs) {
+      const order = orderDoc.data();
+
+      // Skip if no paidDate (not a completed sale)
+      if (!order.paidDate) continue;
+
+      const saleDate = new Date(order.paidDate);
+      const salePrice = parseCurrency(order.earnings);
+      const purchaseCost = parseCurrency(order.buyPrice);
+      const shipCost = parseCurrency(order.shipPrice);
+      const profit = salePrice - purchaseCost - shipCost;
+      const profitMargin = salePrice > 0 ? (profit / salePrice) * 100 : 0;
+
+      // Create sale record in subcollection
+      const saleRef = itemStatsRef.collection("sales").doc(orderDoc.id);
+      batch.set(saleRef, {
+        id: orderDoc.id,
+        orderRef: `orders/${orderDoc.id}`,
+        orderNumber: order.orderNumber || null,
+        salePrice,
+        purchaseCost: purchaseCost || null,
+        shipCost: shipCost || null,
+        profit: Math.round(profit * 100) / 100,
+        profitMargin: Math.round(profitMargin * 10) / 10,
+        saleDate: admin.firestore.Timestamp.fromDate(saleDate),
+        sku: order.sku || null,
+        createdAt: now,
+      });
+
+      totalRevenue += salePrice;
+      totalCost += purchaseCost + shipCost;
+      totalProfit += profit;
+      salesCreated++;
+      batchCount++;
+
+      // Commit batch if approaching limit
+      if (batchCount >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        batchCount = 0;
+      }
+    }
+
+    // Update itemStats with recalculated profit data
+    if (salesCreated > 0) {
+      const avgMargin = totalRevenue > 0 ?
+        (totalProfit / totalRevenue) * 100 : 0;
+
+      batch.update(itemStatsRef, {
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        totalCost: Math.round(totalCost * 100) / 100,
+        totalProfit: Math.round(totalProfit * 100) / 100,
+        avgProfitMargin: Math.round(avgMargin * 10) / 10,
+        updatedAt: now,
+      });
+      batchCount++;
+    }
+
+    // Commit remaining
+    if (batchCount > 0) {
+      await batch.commit();
+    }
+
+    logger.info(`Backfill completed: ${salesCreated} sales created for ${itemName}`);
+    return {
+      success: true,
+      salesCreated,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      totalProfit: Math.round(totalProfit * 100) / 100,
+    };
+  }
+);
+
+/**
  * Scheduled Function: Weekly price check for items with vehicleInfo
  * Runs every Sunday at 3 AM
  */

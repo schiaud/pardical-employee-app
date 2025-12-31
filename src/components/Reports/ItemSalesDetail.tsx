@@ -39,8 +39,9 @@ import {
 } from 'recharts';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import SyncIcon from '@mui/icons-material/Sync';
 import { ItemStats, SaleRecord } from '../../types/staleItems';
-import { getSalesForItem, formatCurrency } from '../../services/staleItems';
+import { getSalesForItem, formatCurrency, backfillSalesForItem } from '../../services/staleItems';
 
 interface ItemSalesDetailProps {
   item: ItemStats;
@@ -52,6 +53,8 @@ const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#00C49F', '#FFBB28'
 const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, prototype: initialPrototype = 'A' }) => {
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillAttempted, setBackfillAttempted] = useState(false);
   const [prototype, setPrototype] = useState<'A' | 'B' | 'C'>(initialPrototype);
 
   useEffect(() => {
@@ -60,14 +63,40 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, prototype: init
       const salesData = await getSalesForItem(item.id);
       setSales(salesData);
       setLoading(false);
+
+      // Auto-backfill if no sales but item has totalSold > 0
+      if (salesData.length === 0 && item.totalSold > 0 && !backfillAttempted) {
+        setBackfillAttempted(true);
+        setBackfilling(true);
+        try {
+          const result = await backfillSalesForItem(item.id, item.itemName);
+          if (result.success && result.salesCreated && result.salesCreated > 0) {
+            // Refetch sales after successful backfill
+            const newSalesData = await getSalesForItem(item.id);
+            setSales(newSalesData);
+          }
+        } catch (error) {
+          console.error('Backfill error:', error);
+        } finally {
+          setBackfilling(false);
+        }
+      }
     };
     fetchSales();
-  }, [item.id]);
+  }, [item.id, item.itemName, item.totalSold, backfillAttempted]);
 
-  if (loading) {
+  if (loading || backfilling) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 4, gap: 2 }}>
         <CircularProgress />
+        {backfilling && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <SyncIcon sx={{ animation: 'spin 1s linear infinite', '@keyframes spin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } } }} />
+            <Typography variant="body2" color="text.secondary">
+              Populating sales data from orders...
+            </Typography>
+          </Box>
+        )}
       </Box>
     );
   }
@@ -78,19 +107,32 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, prototype: init
   const avgProfit = sales.length > 0 ? totalProfit / sales.length : 0;
   const avgMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
-  // Prepare chart data
-  const chartData = sales
-    .sort((a, b) => new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime())
-    .map((sale, index) => ({
+  // Prepare chart data with timestamp for linear time scale
+  // Filter out sales where purchase cost is $0 (unknown cost data)
+  const sortedSales = [...sales].sort((a, b) => new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime());
+  const salesWithCost = sortedSales.filter(sale => (sale.purchaseCost || 0) > 0);
+  const chartData = salesWithCost.map((sale, index) => ({
+      timestamp: new Date(sale.saleDate).getTime(),
       date: new Date(sale.saleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }),
       fullDate: new Date(sale.saleDate).toLocaleDateString(),
       salePrice: sale.salePrice || 0,
       cost: (sale.purchaseCost || 0) + (sale.shipCost || 0),
       profit: sale.profit || 0,
       margin: sale.profitMargin || 0,
-      cumProfit: sales.slice(0, index + 1).reduce((sum, s) => sum + (s.profit || 0), 0),
+      cumProfit: salesWithCost.slice(0, index + 1).reduce((sum, s) => sum + (s.profit || 0), 0),
       orderNumber: sale.orderNumber,
     }));
+
+  // Get time domain for linear scale (extend to current date)
+  const timeExtent = chartData.length > 0
+    ? [chartData[0].timestamp, Date.now()]
+    : [Date.now(), Date.now()];
+
+  // Format timestamp for axis labels
+  const formatTimestamp = (ts: number) => {
+    const date = new Date(ts);
+    return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  };
 
   // Monthly aggregation for bar chart
   const monthlyData = sales.reduce((acc, sale) => {
@@ -160,10 +202,19 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, prototype: init
         <ResponsiveContainer width="100%" height={250}>
           <AreaChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-            <XAxis dataKey="date" stroke="#888" fontSize={11} />
+            <XAxis
+              dataKey="timestamp"
+              type="number"
+              scale="time"
+              domain={timeExtent}
+              stroke="#888"
+              fontSize={11}
+              tickFormatter={formatTimestamp}
+            />
             <YAxis stroke="#888" fontSize={11} tickFormatter={(v) => `$${v}`} />
             <Tooltip
               contentStyle={{ backgroundColor: '#1e1e1e', border: '1px solid #444' }}
+              labelFormatter={(ts) => new Date(ts).toLocaleDateString()}
               formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cumulative Profit']}
             />
             <Area type="monotone" dataKey="cumProfit" stroke="#82ca9d" fill="#82ca9d" fillOpacity={0.3} />
@@ -177,11 +228,20 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, prototype: init
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-            <XAxis dataKey="date" stroke="#888" fontSize={11} />
+            <XAxis
+              dataKey="timestamp"
+              type="number"
+              scale="time"
+              domain={timeExtent}
+              stroke="#888"
+              fontSize={11}
+              tickFormatter={formatTimestamp}
+            />
             <YAxis stroke="#888" fontSize={11} tickFormatter={(v) => `$${v}`} />
             <Tooltip
               contentStyle={{ backgroundColor: '#1e1e1e', border: '1px solid #444' }}
-              formatter={(value: number, name: string) => [`$${value.toFixed(2)}`, name === 'profit' ? 'Profit' : name]}
+              labelFormatter={(ts) => new Date(ts).toLocaleDateString()}
+              formatter={(value: number, name: string) => [`$${value.toFixed(2)}`, name === 'profit' ? 'Profit' : 'Sale Price']}
             />
             <Line type="monotone" dataKey="profit" stroke="#8884d8" strokeWidth={2} dot={{ fill: '#8884d8', r: 4 }} />
             <Line type="monotone" dataKey="salePrice" stroke="#ffc658" strokeWidth={1} strokeDasharray="5 5" />
@@ -325,10 +385,19 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, prototype: init
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                <XAxis dataKey="date" stroke="#888" fontSize={11} />
+                <XAxis
+                  dataKey="timestamp"
+                  type="number"
+                  scale="time"
+                  domain={timeExtent}
+                  stroke="#888"
+                  fontSize={11}
+                  tickFormatter={formatTimestamp}
+                />
                 <YAxis stroke="#888" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e1e1e', border: '1px solid #444' }}
+                  labelFormatter={(ts) => new Date(ts).toLocaleDateString()}
                   formatter={(value: number) => [`${value.toFixed(1)}%`, 'Margin']}
                 />
                 <Line type="monotone" dataKey="margin" stroke="#ff7300" strokeWidth={2} dot={{ fill: '#ff7300', r: 3 }} />
@@ -424,6 +493,7 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, prototype: init
                 <Typography variant="caption" color="text.secondary">Profit Trend</Typography>
                 <ResponsiveContainer width="100%" height={60}>
                   <AreaChart data={chartData}>
+                    <XAxis dataKey="timestamp" type="number" scale="time" domain={timeExtent} hide />
                     <Area type="monotone" dataKey="profit" stroke="#82ca9d" fill="#82ca9d" fillOpacity={0.3} />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -463,9 +533,12 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, prototype: init
               <Typography variant="subtitle2" gutterBottom fontWeight="bold">Cumulative Profit</Typography>
               <ResponsiveContainer width="100%" height={100}>
                 <LineChart data={chartData}>
-                  <XAxis dataKey="date" stroke="#888" fontSize={9} tick={false} />
+                  <XAxis dataKey="timestamp" type="number" scale="time" domain={timeExtent} stroke="#888" fontSize={9} tick={false} />
                   <YAxis stroke="#888" fontSize={9} tickFormatter={(v) => `$${v}`} />
-                  <Tooltip contentStyle={{ backgroundColor: '#1e1e1e', border: '1px solid #444', fontSize: '12px' }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e1e1e', border: '1px solid #444', fontSize: '12px' }}
+                    labelFormatter={(ts) => new Date(ts).toLocaleDateString()}
+                  />
                   <Line type="monotone" dataKey="cumProfit" stroke="#82ca9d" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>

@@ -10,6 +10,7 @@ export {
   calculateDailyStaleMetrics,
   migrateOrdersToItemStats,
   weeklyPriceCheck,
+  backfillSalesForItem,
 } from "./itemStats";
 
 // Car-Part.com scraper functions
@@ -21,6 +22,9 @@ export {
 
 // eBay import functions
 export {importEbayData} from "./ebayImport";
+
+// Test data population (temporary)
+export {populateTestSales} from "./populateTestSales";
 
 /**
  * eBay Webhook Handler

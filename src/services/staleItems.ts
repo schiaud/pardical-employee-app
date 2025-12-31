@@ -399,3 +399,55 @@ export const formatCurrency = (value: number): string => {
 export const formatProfitMargin = (margin: number): string => {
   return `${margin.toFixed(1)}%`;
 };
+
+// Backfill sales subcollection for a specific item
+export const backfillSalesForItem = async (
+  itemId: string,
+  itemName: string
+): Promise<{
+  success: boolean;
+  salesCreated?: number;
+  totalRevenue?: number;
+  totalProfit?: number;
+  error?: string;
+}> => {
+  try {
+    const functions = getFunctions();
+    const backfill = httpsCallable<
+      { itemId: string; itemName: string },
+      { success: boolean; salesCreated: number; totalRevenue: number; totalProfit: number }
+    >(functions, 'backfillSalesForItem');
+    const result = await backfill({ itemId, itemName });
+    return result.data;
+  } catch (error) {
+    console.error('Error backfilling sales:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+};
+
+// Populate test sales data (temporary for testing)
+export const populateTestSales = async (itemName?: string): Promise<{
+  success: boolean;
+  salesCreated?: number;
+  totalProfit?: number;
+  error?: string;
+}> => {
+  try {
+    const functions = getFunctions();
+    const populate = httpsCallable<
+      { itemName?: string },
+      { success: boolean; salesCreated: number; totalProfit: number }
+    >(functions, 'populateTestSales');
+    const result = await populate({ itemName });
+    return result.data;
+  } catch (error) {
+    console.error('Error populating test sales:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+};
