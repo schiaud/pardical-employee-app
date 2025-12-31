@@ -2,7 +2,8 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import axios from "axios";
-import cheerio from "cheerio";
+// Fixed cheerio import for Firebase Functions compatibility
+import {load as cheerioLoad} from "cheerio";
 
 const db = admin.firestore();
 
@@ -224,18 +225,58 @@ async function fetchVariants(
     }
   );
 
-  const $ = cheerio.load(response.data);
+  if (!response.data) {
+    throw new Error("No response from car-part.com");
+  }
+
+  logger.info("fetchVariants: cheerioLoad type:", typeof cheerioLoad);
+  logger.info("fetchVariants: response.data length:", response.data?.length);
+
+  const $ = cheerioLoad(response.data);
   const variants: VariantOption[] = [];
 
   // Find radio inputs for variants
   $("input[type='radio'][name='dummyVar']").each((_, el) => {
     const value = $(el).attr("value") || "";
-    // Get the label text (usually next sibling or parent text)
-    const label = $(el).parent().text().trim() ||
-      $(el).next().text().trim() ||
-      value;
 
-    if (value) {
+    // Get the label text - it's the text node directly after the radio button
+    // The HTML structure is: <input type="radio">Label Text<br>
+    let label = "";
+
+    // Use cheerio to get the next sibling and extract text
+    const $el = $(el);
+
+    // Method 1: Get text from next sibling nodes until we hit a <br> or another input
+    const parent = $el.parent();
+    const html = parent.html() || "";
+
+    // Find the position of this input in the HTML and extract text after it
+    const inputHtml = $.html(el);
+    const inputIndex = html.indexOf(inputHtml);
+    if (inputIndex !== -1) {
+      // Get content after this input
+      const afterInput = html.substring(inputIndex + inputHtml.length);
+      // Extract text until next <br>, <input>, or end
+      const match = afterInput.match(/^([^<]*)/);
+      if (match && match[1]) {
+        label = match[1].trim();
+      }
+    }
+
+    // Fallback: try to find associated label element
+    if (!label) {
+      const id = $el.attr("id");
+      if (id) {
+        label = $(`label[for="${id}"]`).text().trim();
+      }
+    }
+
+    // Final fallback: use the value
+    if (!label) {
+      label = value;
+    }
+
+    if (value && label) {
       variants.push({label, value});
     }
   });
@@ -286,7 +327,11 @@ async function searchCarPartCom(
     }
   );
 
-  const $ = cheerio.load(response.data);
+  if (!response.data) {
+    throw new Error("No response from car-part.com");
+  }
+
+  const $ = cheerioLoad(response.data);
 
   // Check if we got redirected to variant selection
   const radioInputs = $("input[type='radio'][name='dummyVar']");
@@ -325,7 +370,11 @@ async function searchCarPartCom(
       }
     );
 
-    return parseResultRows(cheerio.load(response2.data));
+    if (!response2.data) {
+      throw new Error("No response from car-part.com");
+    }
+
+    return parseResultRows(cheerioLoad(response2.data));
   }
 
   return parseResultRows($);

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Container,
   Typography,
@@ -27,6 +27,7 @@ import {
   Collapse,
   Tooltip,
   SelectChangeEvent,
+  Autocomplete,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -35,6 +36,13 @@ import {
   Upload as UploadIcon,
   AttachMoney as PriceIcon,
 } from '@mui/icons-material';
+import {
+  getYears,
+  getMakes,
+  getModelsForMake,
+  getParts,
+  searchParts,
+} from '../../data/carPartData';
 import {
   getItemStats,
   getStaleStatusColor,
@@ -74,6 +82,14 @@ export const StaleItemsReport: React.FC = () => {
   });
   const [variants, setVariants] = useState<CarPartVariant[]>([]);
   const [variantsLoading, setVariantsLoading] = useState(false);
+
+  // Car-part.com dropdown options
+  const years = useMemo(() => getYears(), []);
+  const makes = useMemo(() => getMakes(), []);
+  const [models, setModels] = useState<string[]>([]);
+  const allParts = useMemo(() => getParts(), []);
+  const [partSearchResults, setPartSearchResults] = useState<{ value: string; text: string }[]>([]);
+  const [partInputValue, setPartInputValue] = useState('');
 
   // eBay import state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -123,12 +139,36 @@ export const StaleItemsReport: React.FC = () => {
     setPriceCheckItem(item);
     if (item.vehicleInfo) {
       setVehicleForm(item.vehicleInfo);
+      // Load models for the make if exists
+      if (item.vehicleInfo.make) {
+        setModels(getModelsForMake(item.vehicleInfo.make));
+      }
+      setPartInputValue(item.vehicleInfo.part || '');
       setVariants([]);
     } else {
       setVehicleForm({ year: '', make: '', model: '', part: '' });
+      setModels([]);
+      setPartInputValue('');
       setVariants([]);
     }
     setPriceDialogOpen(true);
+  };
+
+  // Update models when make changes
+  const handleMakeChange = (make: string) => {
+    setVehicleForm((prev) => ({ ...prev, make, model: '' }));
+    setModels(make ? getModelsForMake(make) : []);
+    setVariants([]);
+  };
+
+  // Handle part search
+  const handlePartSearch = (query: string) => {
+    setPartInputValue(query);
+    if (query.length >= 2) {
+      setPartSearchResults(searchParts(query, 30));
+    } else {
+      setPartSearchResults([]);
+    }
   };
 
   const handleCheckVariants = async () => {
@@ -466,41 +506,81 @@ export const StaleItemsReport: React.FC = () => {
               </Typography>
 
               <Box display="flex" flexDirection="column" gap={2}>
-                <TextField
-                  label="Year"
-                  value={vehicleForm.year}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({ ...prev, year: e.target.value }))
-                  }
-                  placeholder="e.g., 2015"
+                {/* Year Dropdown */}
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Year</InputLabel>
+                  <Select
+                    value={vehicleForm.year}
+                    label="Year"
+                    onChange={(e) => {
+                      setVehicleForm((prev) => ({ ...prev, year: e.target.value }));
+                      setVariants([]);
+                    }}
+                  >
+                    {years.map((year) => (
+                      <MenuItem key={year} value={year.toString()}>
+                        {year}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                {/* Make Dropdown */}
+                <Autocomplete
                   size="small"
+                  options={makes}
+                  value={vehicleForm.make || null}
+                  onChange={(_, newValue) => handleMakeChange(newValue || '')}
+                  renderInput={(params) => <TextField {...params} label="Make" />}
+                  isOptionEqualToValue={(option, value) => option === value}
                 />
-                <TextField
-                  label="Make"
-                  value={vehicleForm.make}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({ ...prev, make: e.target.value }))
-                  }
-                  placeholder="e.g., BMW"
+
+                {/* Model Dropdown */}
+                <Autocomplete
                   size="small"
+                  options={models}
+                  value={vehicleForm.model || null}
+                  onChange={(_, newValue) => {
+                    setVehicleForm((prev) => ({ ...prev, model: newValue || '' }));
+                    setVariants([]);
+                  }}
+                  disabled={!vehicleForm.make}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Model"
+                      placeholder={vehicleForm.make ? 'Select model' : 'Select make first'}
+                    />
+                  )}
+                  isOptionEqualToValue={(option, value) => option === value}
                 />
-                <TextField
-                  label="Model"
-                  value={vehicleForm.model}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({ ...prev, model: e.target.value }))
-                  }
-                  placeholder="e.g., X5"
+
+                {/* Part Autocomplete */}
+                <Autocomplete
                   size="small"
-                />
-                <TextField
-                  label="Part"
-                  value={vehicleForm.part}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({ ...prev, part: e.target.value }))
+                  options={partInputValue.length >= 2 ? partSearchResults : allParts}
+                  getOptionLabel={(option) => (typeof option === 'string' ? option : option.text)}
+                  value={
+                    vehicleForm.part
+                      ? allParts.find((p) => p.text === vehicleForm.part) || { value: '', text: vehicleForm.part }
+                      : null
                   }
-                  placeholder="e.g., Headlight Assembly"
-                  size="small"
+                  onChange={(_, newValue) => {
+                    const partText = typeof newValue === 'string' ? newValue : newValue?.text || '';
+                    setVehicleForm((prev) => ({ ...prev, part: partText }));
+                    setPartInputValue(partText);
+                    setVariants([]);
+                  }}
+                  onInputChange={(_, newInputValue) => handlePartSearch(newInputValue)}
+                  inputValue={partInputValue}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Part" placeholder="Search for a part..." />
+                  )}
+                  filterOptions={(options) => options}
+                  isOptionEqualToValue={(option, value) =>
+                    (typeof option === 'string' ? option : option.text) ===
+                    (typeof value === 'string' ? value : value.text)
+                  }
                 />
 
                 <Button
