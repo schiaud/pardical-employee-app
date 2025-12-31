@@ -45,6 +45,78 @@ const getMonthKey = (date: Date): string => {
 };
 
 /**
+ * Trigger automatic pricing fetch for items with vehicleInfo
+ * Called asynchronously when new orders come in
+ */
+async function triggerAutoPricingFetch(itemId: string): Promise<void> {
+  try {
+    const itemDoc = await db.collection("itemStats").doc(itemId).get();
+    if (!itemDoc.exists) return;
+
+    const itemData = itemDoc.data();
+    const vehicleInfo = itemData?.vehicleInfo;
+
+    // Only fetch if vehicleInfo is complete
+    if (!vehicleInfo?.year || !vehicleInfo?.make ||
+        !vehicleInfo?.model || !vehicleInfo?.part) {
+      return;
+    }
+
+    logger.info(`Auto-fetching pricing for item: ${itemId}`);
+
+    // Dynamically import scraper to avoid circular dependencies
+    const {scrapeCarPartPricing} = await import("./carPartScraper");
+
+    const result = await scrapeCarPartPricing({
+      year: vehicleInfo.year,
+      make: vehicleInfo.make,
+      model: vehicleInfo.model,
+      part: vehicleInfo.part,
+      variantValue: vehicleInfo.variantValue,
+    });
+
+    if (result.success && result.metrics) {
+      const now = admin.firestore.Timestamp.now();
+      const itemRef = db.collection("itemStats").doc(itemId);
+
+      // Get existing price history
+      const existingHistory = itemData?.priceHistory || [];
+      const priceEntry = {
+        avgPrice: result.metrics.avgPrice,
+        minPrice: result.metrics.minPrice,
+        maxPrice: result.metrics.maxPrice,
+        totalListings: result.metrics.totalListings,
+        checkedAt: now,
+      };
+
+      // Keep last 10 entries
+      existingHistory.push(priceEntry);
+      if (existingHistory.length > 10) {
+        existingHistory.shift();
+      }
+
+      await itemRef.update({
+        pricingData: {
+          avgPrice: result.metrics.avgPrice,
+          minPrice: result.metrics.minPrice,
+          maxPrice: result.metrics.maxPrice,
+          stdDev: result.metrics.stdDev,
+          totalListings: result.metrics.totalListings,
+          totalPages: result.metrics.totalPages,
+          lastUpdated: now,
+        },
+        priceHistory: existingHistory,
+        updatedAt: now,
+      });
+
+      logger.info(`Auto-updated pricing for ${itemId}: $${result.metrics.avgPrice} (${result.metrics.totalPages} pages)`);
+    }
+  } catch (error) {
+    logger.error(`Auto-pricing failed for ${itemId}:`, error);
+  }
+}
+
+/**
  * Firestore Trigger: Update itemStats when orders are created/updated
  */
 export const updateItemStatsOnOrder = onDocumentWritten(
@@ -77,6 +149,12 @@ export const updateItemStatsOnOrder = onDocumentWritten(
           after.buyPrice,
           after.shipPrice
         );
+
+        // Trigger auto-pricing fetch asynchronously (don't block order processing)
+        const normalizedId = normalizeItemName(after.item);
+        triggerAutoPricingFetch(normalizedId).catch((err) => {
+          logger.error("Auto-pricing trigger error:", err);
+        });
       }
     } catch (error) {
       logger.error("Error updating item stats:", error);

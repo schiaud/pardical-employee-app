@@ -6,6 +6,7 @@ export interface PricingData {
   maxPrice: number;
   stdDev: number;
   totalListings: number;
+  totalPages?: number;
   lastUpdated: Date;
 }
 
@@ -78,6 +79,7 @@ export interface ItemStatsFirestore {
     maxPrice: number;
     stdDev: number;
     totalListings: number;
+    totalPages?: number;
     lastUpdated: Timestamp;
   };
   ebayMetrics?: {

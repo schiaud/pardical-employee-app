@@ -13,6 +13,7 @@ interface PricingResult {
   maxPrice: number;
   stdDev: number;
   totalListings: number;
+  totalPages: number;
 }
 
 interface CarPartListing {
@@ -54,7 +55,7 @@ export async function scrapeCarPartPricing(
   const makeModel = `${make} ${model}`;
 
   try {
-    const listings = await searchCarPartCom(
+    const {listings, totalPages} = await searchCarPartCom(
       year,
       makeModel,
       part,
@@ -70,7 +71,7 @@ export async function scrapeCarPartPricing(
       };
     }
 
-    const metrics = calculateMetrics(listings);
+    const metrics = calculateMetrics(listings, totalPages);
 
     return {
       success: true,
@@ -80,6 +81,7 @@ export async function scrapeCarPartPricing(
         maxPrice: metrics.maxPrice,
         stdDev: metrics.stdDev,
         totalListings: metrics.totalListings,
+        totalPages: metrics.totalPages,
       },
     };
   } catch (error) {
@@ -152,7 +154,7 @@ export const fetchCarPartPricing = onCall(
     try {
       logger.info("Fetching car-part pricing", {year, makeModel, part});
 
-      const listings = await searchCarPartCom(
+      const {listings, totalPages} = await searchCarPartCom(
         year,
         makeModel,
         part,
@@ -168,7 +170,7 @@ export const fetchCarPartPricing = onCall(
         };
       }
 
-      const metrics = calculateMetrics(listings);
+      const metrics = calculateMetrics(listings, totalPages);
 
       return {
         success: true,
@@ -178,6 +180,7 @@ export const fetchCarPartPricing = onCall(
           maxPrice: metrics.maxPrice,
           stdDev: metrics.stdDev,
           totalListings: metrics.totalListings,
+          totalPages: metrics.totalPages,
           lastUpdated: admin.firestore.Timestamp.now(),
         },
       };
@@ -290,10 +293,10 @@ async function searchCarPartCom(
   part: string,
   postalCode: string,
   variantValue?: string
-): Promise<CarPartListing[]> {
+): Promise<{listings: CarPartListing[]; totalPages: number}> {
   const httpsAgent = new (require("https").Agent)({rejectUnauthorized: false});
 
-  // Initial search
+  // Initial search (page 1) to detect total pages and handle variants
   let formData = new URLSearchParams({
     userDate: year,
     userModel: makeModel,
@@ -331,7 +334,8 @@ async function searchCarPartCom(
     throw new Error("No response from car-part.com");
   }
 
-  const $ = cheerioLoad(response.data);
+  let $ = cheerioLoad(response.data);
+  let resolvedVariant = variantValue;
 
   // Check if we got redirected to variant selection
   const radioInputs = $("input[type='radio'][name='dummyVar']");
@@ -339,6 +343,7 @@ async function searchCarPartCom(
   if (radioInputs.length > 0 && !variantValue) {
     // Use first variant by default
     const firstVariant = radioInputs.first().attr("value") || "";
+    resolvedVariant = firstVariant;
 
     formData = new URLSearchParams({
       userDate: year,
@@ -374,10 +379,53 @@ async function searchCarPartCom(
       throw new Error("No response from car-part.com");
     }
 
-    return parseResultRows(cheerioLoad(response2.data));
+    $ = cheerioLoad(response2.data);
   }
 
-  return parseResultRows($);
+  // Detect total pages from page 1 response
+  const totalPages = detectTotalPages($);
+  logger.info(`Detected ${totalPages} total pages for search`);
+
+  // If only 1 page, just return page 1 results
+  if (totalPages <= 1) {
+    return {
+      listings: parseResultRows($),
+      totalPages: 1,
+    };
+  }
+
+  // Determine which pages to fetch based on sampling algorithm
+  const pagesToFetch = selectPagesToFetch(totalPages);
+  logger.info(`Fetching pages: ${pagesToFetch.join(", ")}`);
+
+  // Collect all listings from selected pages
+  const allListings: CarPartListing[] = [];
+
+  for (const pageNum of pagesToFetch) {
+    // Rate limiting: 1 second delay between requests
+    await sleep(1000);
+
+    try {
+      const pageListings = await fetchSinglePage(
+        year,
+        makeModel,
+        part,
+        postalCode,
+        pageNum,
+        resolvedVariant
+      );
+      allListings.push(...pageListings);
+      logger.info(`Page ${pageNum}: fetched ${pageListings.length} listings`);
+    } catch (err) {
+      logger.warn(`Failed to fetch page ${pageNum}:`, err);
+      // Continue with other pages even if one fails
+    }
+  }
+
+  return {
+    listings: allListings,
+    totalPages,
+  };
 }
 
 function parseResultRows($: cheerio.Root): CarPartListing[] {
@@ -449,7 +497,117 @@ function parseResultRows($: cheerio.Root): CarPartListing[] {
   return listings;
 }
 
-function calculateMetrics(listings: CarPartListing[]): PricingResult {
+/**
+ * Detect total number of pages from car-part.com HTML
+ */
+function detectTotalPages($: cheerio.Root): number {
+  // Look for "Page X of Y" pattern in page text
+  const pageText = $("body").text();
+  const pageMatch = pageText.match(/Page\s*\d+\s*of\s*(\d+)/i);
+  if (pageMatch) {
+    return parseInt(pageMatch[1], 10);
+  }
+
+  // Fallback: look for pagination links
+  let maxPage = 1;
+  $("a").each((_, el) => {
+    const href = $(el).attr("href") || "";
+    const match = href.match(/userPage=(\d+)/);
+    if (match) {
+      const pageNum = parseInt(match[1], 10);
+      if (pageNum > maxPage) maxPage = pageNum;
+    }
+  });
+
+  return maxPage;
+}
+
+/**
+ * Select which pages to fetch based on total page count
+ * For 11+ pages: 2nd highest, 2 middle (ceiling), 2nd and 3rd lowest
+ * For 3-10 pages: Skip page 1 (highest) and last (lowest)
+ */
+function selectPagesToFetch(totalPages: number): number[] {
+  if (totalPages <= 2) {
+    return totalPages === 2 ? [2] : [1];
+  }
+
+  if (totalPages >= 11) {
+    // 2nd highest (page 2), 2 middle (ceiling), 2nd and 3rd lowest
+    const middle = Math.ceil(totalPages / 2);
+    return [2, middle, middle + 1, totalPages - 2, totalPages - 1];
+  }
+
+  // 3-10 pages: skip page 1 (highest price) and last page (lowest price)
+  const pages: number[] = [];
+  for (let i = 2; i < totalPages; i++) {
+    pages.push(i);
+  }
+  return pages.length > 0 ? pages : [1];
+}
+
+/**
+ * Fetch a single page from car-part.com
+ */
+async function fetchSinglePage(
+  year: string,
+  makeModel: string,
+  part: string,
+  postalCode: string,
+  pageNumber: number,
+  variantValue?: string
+): Promise<CarPartListing[]> {
+  const httpsAgent = new (require("https").Agent)({rejectUnauthorized: false});
+
+  const formData = new URLSearchParams({
+    userDate: year,
+    userModel: makeModel,
+    userPart: part,
+    userLocation: "USA",
+    userPreference: "price",
+    userZip: postalCode,
+    userPage: pageNumber.toString(),
+    userInterchange: variantValue || "None",
+    userDate2: variantValue ? year : "Ending Year",
+    userSearch: "int",
+  });
+
+  if (variantValue) {
+    formData.append("dbModel", "9.36.1.1");
+    formData.append("vinSearch", "");
+    formData.append("dummyVar", variantValue);
+  }
+
+  const response = await axios.post(
+    "https://www.car-part.com/cgi-bin/search.cgi",
+    formData.toString(),
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+      timeout: 15000,
+      httpsAgent,
+    }
+  );
+
+  if (!response.data) {
+    return [];
+  }
+
+  const $ = cheerioLoad(response.data);
+  return parseResultRows($);
+}
+
+/**
+ * Sleep helper for rate limiting
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function calculateMetrics(listings: CarPartListing[], totalPages: number): PricingResult {
   const prices = listings.map((l) => l.price).filter((p) => p > 0);
 
   if (prices.length === 0) {
@@ -459,6 +617,7 @@ function calculateMetrics(listings: CarPartListing[]): PricingResult {
       maxPrice: 0,
       stdDev: 0,
       totalListings: 0,
+      totalPages,
     };
   }
 
@@ -478,6 +637,7 @@ function calculateMetrics(listings: CarPartListing[]): PricingResult {
     maxPrice: Math.round(maxPrice * 100) / 100,
     stdDev: Math.round(stdDev * 100) / 100,
     totalListings: listings.length,
+    totalPages,
   };
 }
 
