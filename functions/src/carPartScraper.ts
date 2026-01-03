@@ -386,20 +386,24 @@ async function searchCarPartCom(
   const totalPages = detectTotalPages($);
   logger.info(`Detected ${totalPages} total pages for search`);
 
+  // Parse page 1 results (we already have this response)
+  const page1Listings = parseResultRows($);
+  logger.info(`Page 1: ${page1Listings.length} listings`);
+
   // If only 1 page, just return page 1 results
   if (totalPages <= 1) {
     return {
-      listings: parseResultRows($),
+      listings: page1Listings,
       totalPages: 1,
     };
   }
 
-  // Determine which pages to fetch based on sampling algorithm
+  // Determine which additional pages to fetch (page 1 already fetched)
   const pagesToFetch = selectPagesToFetch(totalPages);
-  logger.info(`Fetching pages: ${pagesToFetch.join(", ")}`);
+  logger.info(`Fetching additional pages: ${pagesToFetch.join(", ")}`);
 
-  // Collect all listings from selected pages
-  const allListings: CarPartListing[] = [];
+  // Collect all listings, starting with page 1 results
+  const allListings: CarPartListing[] = [...page1Listings];
 
   for (const pageNum of pagesToFetch) {
     // Rate limiting: 1 second delay between requests
@@ -508,7 +512,7 @@ function detectTotalPages($: cheerio.Root): number {
     return parseInt(pageMatch[1], 10);
   }
 
-  // Fallback: look for pagination links
+  // Fallback 1: look for pagination links with userPage parameter
   let maxPage = 1;
   $("a").each((_, el) => {
     const href = $(el).attr("href") || "";
@@ -519,17 +523,44 @@ function detectTotalPages($: cheerio.Root): number {
     }
   });
 
+  if (maxPage > 1) {
+    return maxPage;
+  }
+
+  // Fallback 2: look for numbered links to search.cgi (car-part.com pagination)
+  // These appear as links with text "2", "3", "4", etc. linking to /cgi-bin/search.cgi
+  $("a").each((_, el) => {
+    const href = $(el).attr("href") || "";
+    const text = $(el).text().trim();
+    // Check if link text is a number and href points to search.cgi
+    if (/^\d+$/.test(text) && href.includes("search.cgi")) {
+      const pageNum = parseInt(text, 10);
+      if (pageNum > maxPage) maxPage = pageNum;
+    }
+  });
+
   return maxPage;
 }
 
 /**
  * Select which pages to fetch based on total page count
- * For 11+ pages: 2nd highest, 2 middle (ceiling), 2nd and 3rd lowest
- * For 3-10 pages: Skip page 1 (highest) and last (lowest)
+ * Page 1 is already fetched from initial request, so this returns ADDITIONAL pages
+ * For 1-3 pages: fetch all remaining pages [2, 3]
+ * For 4-10 pages: skip last page (lowest prices)
+ * For 11+ pages: sample 2nd highest, 2 middle, 2nd and 3rd lowest
  */
 function selectPagesToFetch(totalPages: number): number[] {
-  if (totalPages <= 2) {
-    return totalPages === 2 ? [2] : [1];
+  if (totalPages <= 1) {
+    return []; // Page 1 already fetched
+  }
+
+  // For 2-3 pages: fetch ALL remaining pages (page 1 already fetched)
+  if (totalPages <= 3) {
+    const pages: number[] = [];
+    for (let i = 2; i <= totalPages; i++) {
+      pages.push(i);
+    }
+    return pages;
   }
 
   if (totalPages >= 11) {
@@ -538,12 +569,12 @@ function selectPagesToFetch(totalPages: number): number[] {
     return [2, middle, middle + 1, totalPages - 2, totalPages - 1];
   }
 
-  // 3-10 pages: skip page 1 (highest price) and last page (lowest price)
+  // 4-10 pages: skip last page (lowest price outliers)
   const pages: number[] = [];
   for (let i = 2; i < totalPages; i++) {
     pages.push(i);
   }
-  return pages.length > 0 ? pages : [1];
+  return pages;
 }
 
 /**

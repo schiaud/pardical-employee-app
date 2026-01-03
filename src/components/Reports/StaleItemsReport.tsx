@@ -49,7 +49,7 @@ import {
   formatDaysSinceLastSale,
   checkCarPartPricing,
   checkCarPartVariants,
-  saveVehicleInfo,
+  savePriceCheck,
   importEbayData,
   runMigration,
 } from '../../services/staleItems';
@@ -97,6 +97,19 @@ export const StaleItemsReport: React.FC = () => {
 
   // Migration state
   const [migrationLoading, setMigrationLoading] = useState(false);
+
+  // Format date as relative time (e.g., "3d ago", "2w ago")
+  const formatRelativeDate = (date: Date): string => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
 
   const fetchItems = useCallback(async () => {
     try {
@@ -211,14 +224,21 @@ export const StaleItemsReport: React.FC = () => {
       });
 
       if (response.success && response.metrics) {
-        // Save vehicle info for future checks
-        await saveVehicleInfo(priceCheckItem.id, vehicleForm);
+        // Save pricing data and vehicle info to Firestore (also adds to priceHistory subcollection)
+        await savePriceCheck(priceCheckItem.id, {
+          vehicleInfo: vehicleForm,
+          pricingData: response.metrics,
+        });
 
-        // Update local state
+        // Update local state with lastUpdated
         setItems((prev) =>
           prev.map((item) =>
             item.id === priceCheckItem.id
-              ? { ...item, pricingData: response.metrics, vehicleInfo: vehicleForm }
+              ? {
+                  ...item,
+                  pricingData: { ...response.metrics, lastUpdated: new Date() },
+                  vehicleInfo: vehicleForm,
+                }
               : item
           )
         );
@@ -460,15 +480,22 @@ export const StaleItemsReport: React.FC = () => {
                         )}
                       </TableCell>
                       <TableCell align="center">
-                        <Tooltip title={item.vehicleInfo ? 'Re-check price' : 'Check price'}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handlePriceCheck(item)}
-                            color={item.vehicleInfo ? 'primary' : 'default'}
-                          >
-                            <PriceIcon />
-                          </IconButton>
-                        </Tooltip>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.25 }}>
+                          <Tooltip title={item.vehicleInfo ? 'Re-check price' : 'Check price'}>
+                            <IconButton
+                              size="small"
+                              onClick={() => handlePriceCheck(item)}
+                              color={item.vehicleInfo ? 'primary' : 'default'}
+                            >
+                              <PriceIcon />
+                            </IconButton>
+                          </Tooltip>
+                          {item.pricingData?.lastUpdated && (
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                              {formatRelativeDate(item.pricingData.lastUpdated)}
+                            </Typography>
+                          )}
+                        </Box>
                       </TableCell>
                     </TableRow>
                     <TableRow>

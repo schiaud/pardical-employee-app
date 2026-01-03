@@ -8,6 +8,7 @@ import {
   getDoc,
   doc,
   updateDoc,
+  addDoc,
   Timestamp,
   onSnapshot,
   Unsubscribe,
@@ -210,6 +211,55 @@ export const saveVehicleInfo = async (
   await updateDoc(docRef, {
     vehicleInfo,
     updatedAt: Timestamp.now(),
+  });
+};
+
+// Save price check result and add to history subcollection
+export const savePriceCheck = async (
+  itemId: string,
+  data: {
+    vehicleInfo: {
+      year: string;
+      make: string;
+      model: string;
+      part: string;
+      variantValue?: string;
+      variantLabel?: string;
+    };
+    pricingData: {
+      avgPrice: number;
+      minPrice: number;
+      maxPrice: number;
+      stdDev: number;
+      totalListings: number;
+      totalPages?: number;
+    };
+  }
+): Promise<void> => {
+  const itemRef = doc(db, ITEM_STATS_COLLECTION, itemId);
+  const historyRef = collection(itemRef, 'priceHistory');
+
+  const now = Timestamp.now();
+
+  // Update main document with latest pricing and vehicle info
+  await updateDoc(itemRef, {
+    vehicleInfo: data.vehicleInfo,
+    pricingData: {
+      ...data.pricingData,
+      lastUpdated: now,
+    },
+    updatedAt: now,
+  });
+
+  // Add to price history subcollection
+  await addDoc(historyRef, {
+    avgPrice: data.pricingData.avgPrice,
+    minPrice: data.pricingData.minPrice,
+    maxPrice: data.pricingData.maxPrice,
+    stdDev: data.pricingData.stdDev,
+    totalListings: data.pricingData.totalListings,
+    totalPages: data.pricingData.totalPages || null,
+    checkedAt: now,
   });
 };
 
