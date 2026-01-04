@@ -305,17 +305,20 @@ export const checkCarPartVariants = async (
   }
 };
 
-// Import eBay data via Cloud Function
+// Import eBay data via Cloud Function (supports HTML or JSON)
 export const importEbayData = async (
-  htmlContent: string
-): Promise<{ success: boolean; imported: number; error?: string }> => {
+  data: string,
+  format: 'html' | 'json' = 'html'
+): Promise<{ success: boolean; imported: number; totalParsed?: number; error?: string }> => {
   try {
     const functions = getFunctions();
     const importData = httpsCallable<
-      { htmlContent: string },
-      { success: boolean; imported: number; error?: string }
+      { htmlContent?: string; jsonData?: string },
+      { success: boolean; imported: number; totalParsed?: number; error?: string }
     >(functions, 'importEbayData');
-    const result = await importData({ htmlContent });
+
+    const payload = format === 'json' ? { jsonData: data } : { htmlContent: data };
+    const result = await importData(payload);
     return result.data;
   } catch (error) {
     console.error('Error importing eBay data:', error);
@@ -431,10 +434,29 @@ export const getSalesForItem = async (itemId: string): Promise<SaleRecord[]> => 
   }
 };
 
-// Get price history for a specific item
+// Get price history for a specific item from subcollection
 export const getPriceHistory = async (itemId: string): Promise<PriceHistoryEntry[]> => {
-  const item = await getItemStatsById(itemId);
-  return item?.priceHistory || [];
+  try {
+    const itemRef = doc(db, ITEM_STATS_COLLECTION, itemId);
+    const historyRef = collection(itemRef, 'priceHistory');
+    const q = query(historyRef, orderBy('checkedAt', 'desc'), limit(20));
+    const snapshot = await getDocs(q);
+
+    const history: PriceHistoryEntry[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as PriceHistoryEntryFirestore;
+      history.push({
+        ...data,
+        checkedAt: data.checkedAt?.toDate?.() || new Date(),
+      });
+    });
+
+    // Return in chronological order (oldest first)
+    return history.reverse();
+  } catch (error) {
+    console.error('Error fetching price history:', error);
+    return [];
+  }
 };
 
 // Format currency

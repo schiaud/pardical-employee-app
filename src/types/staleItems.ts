@@ -188,6 +188,10 @@ export interface PriceHistoryEntry {
   maxPrice: number;
   totalListings: number;
   checkedAt: Date;
+  // eBay views at this point in time (null if no eBay data)
+  views30Day?: number | null;
+  // Source of this entry: carpart price check, ebay import, or both
+  source?: 'carpart' | 'ebay' | 'both';
 }
 
 export interface PriceHistoryEntryFirestore {
@@ -196,4 +200,6 @@ export interface PriceHistoryEntryFirestore {
   maxPrice: number;
   totalListings: number;
   checkedAt: Timestamp;
+  views30Day?: number | null;
+  source?: 'carpart' | 'ebay' | 'both';
 }

@@ -94,6 +94,9 @@ export const StaleItemsReport: React.FC = () => {
   // eBay import state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
+  const [importMode, setImportMode] = useState<'json' | 'html'>('json');
+  const [jsonInput, setJsonInput] = useState('');
+  const [importResult, setImportResult] = useState<{ imported: number; totalParsed?: number } | null>(null);
 
   // Migration state
   const [migrationLoading, setMigrationLoading] = useState(false);
@@ -260,13 +263,38 @@ export const StaleItemsReport: React.FC = () => {
     if (!file) return;
 
     setImportLoading(true);
+    setImportResult(null);
     try {
       const htmlContent = await file.text();
-      const result = await importEbayData(htmlContent);
+      const result = await importEbayData(htmlContent, 'html');
 
       if (result.success) {
+        setImportResult({ imported: result.imported, totalParsed: result.totalParsed });
         await fetchItems();
-        setImportDialogOpen(false);
+      } else if (result.error) {
+        setError(result.error);
+      }
+    } catch (err) {
+      console.error('Error importing eBay data:', err);
+      setError('Failed to import eBay data');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const handleJsonImport = async () => {
+    if (!jsonInput.trim()) return;
+
+    setImportLoading(true);
+    setImportResult(null);
+    setError(null);
+    try {
+      const result = await importEbayData(jsonInput, 'json');
+
+      if (result.success) {
+        setImportResult({ imported: result.imported, totalParsed: result.totalParsed });
+        await fetchItems();
+        setJsonInput('');
       } else if (result.error) {
         setError(result.error);
       }
@@ -672,32 +700,104 @@ export const StaleItemsReport: React.FC = () => {
       {/* eBay Import Dialog */}
       <Dialog
         open={importDialogOpen}
-        onClose={() => setImportDialogOpen(false)}
-        maxWidth="sm"
+        onClose={() => {
+          setImportDialogOpen(false);
+          setImportResult(null);
+          setError(null);
+        }}
+        maxWidth="md"
         fullWidth
       >
         <DialogTitle>Import eBay Seller Hub Data</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" paragraph sx={{ mt: 1 }}>
-            Upload the saved HTML file from your eBay Seller Hub "Manage active listings"
-            page to import views and watcher data.
-          </Typography>
-          <input
-            type="file"
-            accept=".html,.htm"
-            onChange={handleEbayImport}
-            disabled={importLoading}
-            style={{ marginTop: 16 }}
-          />
+          {/* Mode Toggle */}
+          <Box display="flex" gap={1} mb={2} mt={1}>
+            <Chip
+              label="Paste JSON"
+              color={importMode === 'json' ? 'primary' : 'default'}
+              onClick={() => setImportMode('json')}
+              clickable
+            />
+            <Chip
+              label="Upload HTML"
+              color={importMode === 'html' ? 'primary' : 'default'}
+              onClick={() => setImportMode('html')}
+              clickable
+            />
+          </Box>
+
+          {importMode === 'json' ? (
+            <Box>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                1. Go to your eBay Seller Hub &quot;Manage active listings&quot; page<br />
+                2. Open browser DevTools (F12) → Console tab<br />
+                3. Paste the extraction script and press Enter<br />
+                4. Paste the copied JSON data below
+              </Typography>
+              <TextField
+                multiline
+                rows={8}
+                fullWidth
+                placeholder='[{"title": "...", "views": 123, "watchers": 5, "price": 99.99}]'
+                value={jsonInput}
+                onChange={(e) => setJsonInput(e.target.value)}
+                disabled={importLoading}
+                sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+              />
+              <Typography variant="caption" color="text.secondary" display="block" mt={1}>
+                Script location: scripts/ebay-extractor.js
+              </Typography>
+            </Box>
+          ) : (
+            <Box>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                Upload the saved HTML file from your eBay Seller Hub &quot;Manage active
+                listings&quot; page. Note: This may not work if the page data is loaded
+                dynamically.
+              </Typography>
+              <input
+                type="file"
+                accept=".html,.htm"
+                onChange={handleEbayImport}
+                disabled={importLoading}
+                style={{ marginTop: 16 }}
+              />
+            </Box>
+          )}
+
           {importLoading && (
             <Box display="flex" alignItems="center" gap={1} mt={2}>
               <CircularProgress size={20} />
               <Typography variant="body2">Importing...</Typography>
             </Box>
           )}
+
+          {importResult && (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              Successfully matched {importResult.imported} items
+              {importResult.totalParsed && ` (${importResult.totalParsed} total parsed from eBay)`}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setImportDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={() => {
+              setImportDialogOpen(false);
+              setImportResult(null);
+              setError(null);
+            }}
+          >
+            {importResult ? 'Done' : 'Cancel'}
+          </Button>
+          {importMode === 'json' && !importResult && (
+            <Button
+              onClick={handleJsonImport}
+              variant="contained"
+              disabled={importLoading || !jsonInput.trim()}
+            >
+              Import
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </Container>
