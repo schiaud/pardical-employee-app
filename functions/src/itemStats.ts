@@ -79,33 +79,21 @@ async function triggerAutoPricingFetch(itemId: string): Promise<void> {
       const now = admin.firestore.Timestamp.now();
       const itemRef = db.collection("itemStats").doc(itemId);
 
-      // Get existing price history
-      const existingHistory = itemData?.priceHistory || [];
-      const priceEntry = {
+      // Write to priceHistory SUBCOLLECTION only (no field)
+      const priceHistoryRef = itemRef.collection("priceHistory");
+      await priceHistoryRef.add({
         avgPrice: result.metrics.avgPrice,
         minPrice: result.metrics.minPrice,
         maxPrice: result.metrics.maxPrice,
+        stdDev: result.metrics.stdDev,
         totalListings: result.metrics.totalListings,
+        totalPages: result.metrics.totalPages,
         checkedAt: now,
-      };
+        source: "carpart",
+      });
 
-      // Keep last 10 entries
-      existingHistory.push(priceEntry);
-      if (existingHistory.length > 10) {
-        existingHistory.shift();
-      }
-
+      // Update only the timestamp on main document
       await itemRef.update({
-        pricingData: {
-          avgPrice: result.metrics.avgPrice,
-          minPrice: result.metrics.minPrice,
-          maxPrice: result.metrics.maxPrice,
-          stdDev: result.metrics.stdDev,
-          totalListings: result.metrics.totalListings,
-          totalPages: result.metrics.totalPages,
-          lastUpdated: now,
-        },
-        priceHistory: existingHistory,
         updatedAt: now,
       });
 
@@ -358,13 +346,26 @@ export const calculateDailyStaleMetrics = onSchedule(
         const weeksActive = Math.max(1, daysSinceFirst / 7);
         const salesVelocity = data.totalSold / weeksActive;
 
-        // Count sales in windows (simplified - actual would query orders)
-        // Rolling counts are maintained by the trigger function
+        // Count sales in rolling windows from sales subcollection
+        const salesSnapshot = await doc.ref.collection("sales").get();
+        let salesLast30Days = 0;
+        let salesLast90Days = 0;
+
+        for (const saleDoc of salesSnapshot.docs) {
+          const saleData = saleDoc.data();
+          const saleDate = saleData.saleDate?.toDate();
+          if (saleDate) {
+            if (saleDate >= thirtyDaysAgo) salesLast30Days++;
+            if (saleDate >= ninetyDaysAgo) salesLast90Days++;
+          }
+        }
 
         batch.update(doc.ref, {
           daysSinceLastSale,
           isStale,
           salesVelocity: Math.round(salesVelocity * 10) / 10,
+          salesLast30Days,
+          salesLast90Days,
           updatedAt: admin.firestore.Timestamp.now(),
         });
 
@@ -762,27 +763,22 @@ export const weeklyPriceCheck = onSchedule(
 
         if (result.success && result.metrics) {
           const now = admin.firestore.Timestamp.now();
-          const priceEntry = {
+
+          // Write to priceHistory SUBCOLLECTION only (no field)
+          const priceHistoryRef = doc.ref.collection("priceHistory");
+          await priceHistoryRef.add({
             avgPrice: result.metrics.avgPrice,
             minPrice: result.metrics.minPrice,
             maxPrice: result.metrics.maxPrice,
+            stdDev: result.metrics.stdDev,
             totalListings: result.metrics.totalListings,
+            totalPages: result.metrics.totalPages,
             checkedAt: now,
-          };
+            source: "carpart",
+          });
 
-          // Get existing price history and append (keep last 10)
-          const priceHistory = data.priceHistory || [];
-          priceHistory.push(priceEntry);
-          if (priceHistory.length > 10) {
-            priceHistory.shift();
-          }
-
+          // Update only the timestamp on main document
           await doc.ref.update({
-            pricingData: {
-              ...result.metrics,
-              lastUpdated: now,
-            },
-            priceHistory,
             updatedAt: now,
           });
 

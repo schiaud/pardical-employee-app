@@ -52,12 +52,16 @@ import {
   savePriceCheck,
   importEbayData,
   runMigration,
+  getLatestPricingData,
+  getLatestEbayMetrics,
 } from '../../services/staleItems';
 import {
   ItemStats,
   StaleThreshold,
   CarPartVariant,
   VehicleInfo,
+  PriceHistoryEntry,
+  EbayMetricsEntry,
 } from '../../types/staleItems';
 import ItemSalesDetail from './ItemSalesDetail';
 
@@ -101,6 +105,10 @@ export const StaleItemsReport: React.FC = () => {
   // Migration state
   const [migrationLoading, setMigrationLoading] = useState(false);
 
+  // Subcollection data (fetched separately from main items)
+  const [pricingData, setPricingData] = useState<Map<string, PriceHistoryEntry>>(new Map());
+  const [ebayData, setEbayData] = useState<Map<string, EbayMetricsEntry>>(new Map());
+
   // Format date as relative time (e.g., "3d ago", "2w ago")
   const formatRelativeDate = (date: Date): string => {
     const now = new Date();
@@ -114,6 +122,31 @@ export const StaleItemsReport: React.FC = () => {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
+  // Fetch subcollection data for all items
+  const fetchSubcollectionData = useCallback(async (itemIds: string[]) => {
+    const pricingMap = new Map<string, PriceHistoryEntry>();
+    const ebayMap = new Map<string, EbayMetricsEntry>();
+
+    // Fetch in parallel batches of 10 to avoid overwhelming Firestore
+    const batchSize = 10;
+    for (let i = 0; i < itemIds.length; i += batchSize) {
+      const batch = itemIds.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (itemId) => {
+          const [pricing, ebay] = await Promise.all([
+            getLatestPricingData(itemId),
+            getLatestEbayMetrics(itemId),
+          ]);
+          if (pricing) pricingMap.set(itemId, pricing);
+          if (ebay) ebayMap.set(itemId, ebay);
+        })
+      );
+    }
+
+    setPricingData(pricingMap);
+    setEbayData(ebayMap);
+  }, []);
+
   const fetchItems = useCallback(async () => {
     try {
       setLoading(true);
@@ -121,13 +154,17 @@ export const StaleItemsReport: React.FC = () => {
       const data = await getItemStats({ staleOnly: false });
       setItems(data);
       setFilteredItems(data);
+
+      // Fetch subcollection data for all items
+      const itemIds = data.map((item) => item.id);
+      fetchSubcollectionData(itemIds);
     } catch (err) {
       console.error('Error fetching stale items:', err);
       setError('Failed to load item data.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchSubcollectionData]);
 
   useEffect(() => {
     fetchItems();
@@ -227,21 +264,30 @@ export const StaleItemsReport: React.FC = () => {
       });
 
       if (response.success && response.metrics) {
-        // Save pricing data and vehicle info to Firestore (also adds to priceHistory subcollection)
+        // Save pricing data and vehicle info to Firestore (writes to priceHistory subcollection)
         await savePriceCheck(priceCheckItem.id, {
           vehicleInfo: vehicleForm,
           pricingData: response.metrics,
         });
 
-        // Update local state with lastUpdated
+        // Update local pricingData map with new entry
+        setPricingData((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(priceCheckItem.id, {
+            avgPrice: response.metrics!.avgPrice,
+            minPrice: response.metrics!.minPrice,
+            maxPrice: response.metrics!.maxPrice,
+            totalListings: response.metrics!.totalListings,
+            checkedAt: new Date(),
+          });
+          return newMap;
+        });
+
+        // Update vehicleInfo in items
         setItems((prev) =>
           prev.map((item) =>
             item.id === priceCheckItem.id
-              ? {
-                  ...item,
-                  pricingData: { ...response.metrics, lastUpdated: new Date() },
-                  vehicleInfo: vehicleForm,
-                }
+              ? { ...item, vehicleInfo: vehicleForm }
               : item
           )
         );
@@ -476,12 +522,12 @@ export const StaleItemsReport: React.FC = () => {
                         {item.salesVelocity.toFixed(1)}/week
                       </TableCell>
                       <TableCell align="center">
-                        {item.pricingData ? (
+                        {pricingData.get(item.id) ? (
                           <Tooltip
-                            title={`Min: $${item.pricingData.minPrice} | Max: $${item.pricingData.maxPrice}`}
+                            title={`Min: $${pricingData.get(item.id)!.minPrice} | Max: $${pricingData.get(item.id)!.maxPrice}`}
                           >
                             <Chip
-                              label={`$${item.pricingData.avgPrice.toFixed(0)}`}
+                              label={`$${pricingData.get(item.id)!.avgPrice.toFixed(0)}`}
                               size="small"
                               color="primary"
                             />
@@ -493,10 +539,10 @@ export const StaleItemsReport: React.FC = () => {
                         )}
                       </TableCell>
                       <TableCell align="center">
-                        {item.ebayMetrics ? (
-                          <Tooltip title={`${item.ebayMetrics.watchers} watchers`}>
+                        {ebayData.get(item.id) ? (
+                          <Tooltip title={`${ebayData.get(item.id)!.watchers} watchers`}>
                             <Chip
-                              label={`${item.ebayMetrics.views30Day} views`}
+                              label={`${ebayData.get(item.id)!.views30Day} views`}
                               size="small"
                               variant="outlined"
                             />
@@ -518,9 +564,9 @@ export const StaleItemsReport: React.FC = () => {
                               <PriceIcon />
                             </IconButton>
                           </Tooltip>
-                          {item.pricingData?.lastUpdated && (
+                          {pricingData.get(item.id)?.checkedAt && (
                             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                              {formatRelativeDate(item.pricingData.lastUpdated)}
+                              {formatRelativeDate(pricingData.get(item.id)!.checkedAt)}
                             </Typography>
                           )}
                         </Box>

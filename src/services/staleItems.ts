@@ -26,6 +26,10 @@ import {
   SaleRecordFirestore,
   PriceHistoryEntry,
   PriceHistoryEntryFirestore,
+  EbayMetricsEntry,
+  EbayMetricsEntryFirestore,
+  PricingData,
+  EbayMetrics,
 } from '../types/staleItems';
 
 const ITEM_STATS_COLLECTION = 'itemStats';
@@ -214,7 +218,7 @@ export const saveVehicleInfo = async (
   });
 };
 
-// Save price check result and add to history subcollection
+// Save price check result to history subcollection ONLY (no field)
 export const savePriceCheck = async (
   itemId: string,
   data: {
@@ -241,13 +245,9 @@ export const savePriceCheck = async (
 
   const now = Timestamp.now();
 
-  // Update main document with latest pricing and vehicle info
+  // Update main document with vehicle info only (no pricingData field)
   await updateDoc(itemRef, {
     vehicleInfo: data.vehicleInfo,
-    pricingData: {
-      ...data.pricingData,
-      lastUpdated: now,
-    },
     updatedAt: now,
   });
 
@@ -260,6 +260,7 @@ export const savePriceCheck = async (
     totalListings: data.pricingData.totalListings,
     totalPages: data.pricingData.totalPages || null,
     checkedAt: now,
+    source: 'carpart',
   });
 };
 
@@ -459,6 +460,31 @@ export const getPriceHistory = async (itemId: string): Promise<PriceHistoryEntry
   }
 };
 
+// Get eBay metrics history for a specific item from subcollection
+export const getEbayMetricsHistory = async (itemId: string): Promise<EbayMetricsEntry[]> => {
+  try {
+    const itemRef = doc(db, ITEM_STATS_COLLECTION, itemId);
+    const metricsRef = collection(itemRef, 'ebayMetrics');
+    const q = query(metricsRef, orderBy('recordedAt', 'desc'), limit(20));
+    const snapshot = await getDocs(q);
+
+    const history: EbayMetricsEntry[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as EbayMetricsEntryFirestore;
+      history.push({
+        ...data,
+        recordedAt: data.recordedAt?.toDate?.() || new Date(),
+      });
+    });
+
+    // Return in chronological order (oldest first)
+    return history.reverse();
+  } catch (error) {
+    console.error('Error fetching eBay metrics history:', error);
+    return [];
+  }
+};
+
 // Format currency
 export const formatCurrency = (value: number): string => {
   return new Intl.NumberFormat('en-US', {
@@ -470,6 +496,52 @@ export const formatCurrency = (value: number): string => {
 // Format profit margin
 export const formatProfitMargin = (margin: number): string => {
   return `${margin.toFixed(1)}%`;
+};
+
+// Get latest pricing data from subcollection (most recent entry)
+export const getLatestPricingData = async (itemId: string): Promise<PriceHistoryEntry | null> => {
+  try {
+    const itemRef = doc(db, ITEM_STATS_COLLECTION, itemId);
+    const historyRef = collection(itemRef, 'priceHistory');
+    const q = query(historyRef, orderBy('checkedAt', 'desc'), limit(1));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const data = snapshot.docs[0].data() as PriceHistoryEntryFirestore;
+    return {
+      ...data,
+      checkedAt: data.checkedAt?.toDate?.() || new Date(),
+    };
+  } catch (error) {
+    console.error('Error fetching latest pricing data:', error);
+    return null;
+  }
+};
+
+// Get latest eBay metrics from subcollection (most recent entry)
+export const getLatestEbayMetrics = async (itemId: string): Promise<EbayMetricsEntry | null> => {
+  try {
+    const itemRef = doc(db, ITEM_STATS_COLLECTION, itemId);
+    const metricsRef = collection(itemRef, 'ebayMetrics');
+    const q = query(metricsRef, orderBy('recordedAt', 'desc'), limit(1));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const data = snapshot.docs[0].data() as EbayMetricsEntryFirestore;
+    return {
+      ...data,
+      recordedAt: data.recordedAt?.toDate?.() || new Date(),
+    };
+  } catch (error) {
+    console.error('Error fetching latest eBay metrics:', error);
+    return null;
+  }
 };
 
 // Backfill sales subcollection for a specific item

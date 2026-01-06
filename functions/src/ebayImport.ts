@@ -143,28 +143,48 @@ export const importEbayData = onCall(
           // Add views to priceHistory SUBCOLLECTION (not array field)
           const priceHistoryRef = matchedRef.collection("priceHistory");
 
-          // Check if there's an entry from today (same day)
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const tomorrow = new Date(today);
-          tomorrow.setDate(tomorrow.getDate() + 1);
+          // Check if there's an entry from today (same day) - USE UTC explicitly
+          const currentTime = new Date();
+          const todayStart = new Date(Date.UTC(
+            currentTime.getUTCFullYear(),
+            currentTime.getUTCMonth(),
+            currentTime.getUTCDate(),
+            0, 0, 0, 0
+          ));
+          const tomorrowStart = new Date(Date.UTC(
+            currentTime.getUTCFullYear(),
+            currentTime.getUTCMonth(),
+            currentTime.getUTCDate() + 1,
+            0, 0, 0, 0
+          ));
+
+          logger.info(`[${matchedRef.id}] Searching priceHistory for entries between ${todayStart.toISOString()} and ${tomorrowStart.toISOString()}`);
 
           const todayEntries = await priceHistoryRef
-            .where("checkedAt", ">=", admin.firestore.Timestamp.fromDate(today))
-            .where("checkedAt", "<", admin.firestore.Timestamp.fromDate(tomorrow))
+            .where("checkedAt", ">=", admin.firestore.Timestamp.fromDate(todayStart))
+            .where("checkedAt", "<", admin.firestore.Timestamp.fromDate(tomorrowStart))
             .limit(1)
             .get();
+
+          logger.info(`[${matchedRef.id}] Found ${todayEntries.size} priceHistory entries for today`);
 
           if (!todayEntries.empty) {
             // Update existing entry with views
             const existingEntry = todayEntries.docs[0];
+            const entryDate = existingEntry.data().checkedAt?.toDate?.();
+            logger.info(`[${matchedRef.id}] Updating existing entry from ${entryDate?.toISOString()} with views: ${listing.views30Day}`);
+
             await existingEntry.ref.update({
               views30Day: listing.views30Day,
               watchers: listing.watchers,
               source: existingEntry.data().source === "carpart" ? "both" : "ebay",
             });
+
+            logger.info(`[${matchedRef.id}] Successfully updated priceHistory entry with views`);
           } else {
             // Create new entry in subcollection with views data
+            logger.info(`[${matchedRef.id}] Creating new priceHistory entry with views: ${listing.views30Day}`);
+
             await priceHistoryRef.add({
               avgPrice: existingData.pricingData?.avgPrice || 0,
               minPrice: existingData.pricingData?.minPrice || 0,
@@ -177,16 +197,20 @@ export const importEbayData = onCall(
             });
           }
 
-          // Update main document with ebayMetrics (no priceHistory array)
+          // Add to ebayMetrics SUBCOLLECTION for historical tracking
+          const ebayMetricsRef = matchedRef.collection("ebayMetrics");
+          await ebayMetricsRef.add({
+            views30Day: listing.views30Day,
+            watchers: listing.watchers,
+            quantity: listing.quantity,
+            listingPrice: listing.listingPrice,
+            recordedAt: now,
+          });
+
+          logger.info(`[${matchedRef.id}] Added ebayMetrics subcollection entry`);
+
+          // Update main document (NO ebayMetrics field - using subcollection only)
           batch.update(matchedRef, {
-            ebayMetrics: {
-              views30Day: listing.views30Day,
-              watchers: listing.watchers,
-              quantity: listing.quantity,
-              soldQty: listing.soldQty || 0,
-              listingPrice: listing.listingPrice,
-              lastUpdated: now,
-            },
             // Store IDs for future matching
             ...(listing.customLabel && {customLabel: listing.customLabel}),
             ...(listing.ebayItemId && {ebayItemId: listing.ebayItemId}),

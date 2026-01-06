@@ -203,3 +203,20 @@ export interface PriceHistoryEntryFirestore {
   views30Day?: number | null;
   source?: 'carpart' | 'ebay' | 'both';
 }
+
+// eBay metrics history entry (stored in ebayMetrics subcollection)
+export interface EbayMetricsEntry {
+  views30Day: number;
+  watchers: number;
+  quantity: number;
+  listingPrice: number;
+  recordedAt: Date;
+}
+
+export interface EbayMetricsEntryFirestore {
+  views30Day: number;
+  watchers: number;
+  quantity: number;
+  listingPrice: number;
+  recordedAt: Timestamp;
+}

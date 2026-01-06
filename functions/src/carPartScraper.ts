@@ -673,7 +673,7 @@ function calculateMetrics(listings: CarPartListing[], totalPages: number): Prici
 }
 
 /**
- * Update itemStats with pricing data
+ * Update itemStats with pricing data - writes to priceHistory SUBCOLLECTION only
  */
 export const updateItemPricing = onCall(
   {cors: true},
@@ -686,16 +686,27 @@ export const updateItemPricing = onCall(
 
     try {
       const itemRef = db.collection("itemStats").doc(itemId);
-      const updateData: Record<string, unknown> = {
-        updatedAt: admin.firestore.Timestamp.now(),
-      };
+      const now = admin.firestore.Timestamp.now();
 
+      // Write pricing to subcollection only (no field)
       if (pricingData) {
-        updateData.pricingData = {
-          ...pricingData,
-          lastUpdated: admin.firestore.Timestamp.now(),
-        };
+        const priceHistoryRef = itemRef.collection("priceHistory");
+        await priceHistoryRef.add({
+          avgPrice: pricingData.avgPrice,
+          minPrice: pricingData.minPrice,
+          maxPrice: pricingData.maxPrice,
+          stdDev: pricingData.stdDev || 0,
+          totalListings: pricingData.totalListings,
+          totalPages: pricingData.totalPages || 0,
+          checkedAt: now,
+          source: "carpart",
+        });
       }
+
+      // Update vehicle info and timestamp on main document
+      const updateData: Record<string, unknown> = {
+        updatedAt: now,
+      };
 
       if (vehicleInfo) {
         updateData.vehicleInfo = vehicleInfo;
