@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -30,8 +30,8 @@ import {
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import SyncIcon from '@mui/icons-material/Sync';
-import { ItemStats, SaleRecord, PriceHistoryEntry } from '../../types/staleItems';
-import { getSalesForItem, formatCurrency, backfillSalesForItem, getPriceHistory } from '../../services/staleItems';
+import { ItemStats, SaleRecord, PriceHistoryEntry, EbayMetricsEntry } from '../../types/staleItems';
+import { getSalesForItem, formatCurrency, backfillSalesForItem, getPriceHistory, getEbayMetricsHistory } from '../../services/staleItems';
 
 interface ItemSalesDetailProps {
   item: ItemStats;
@@ -40,27 +40,30 @@ interface ItemSalesDetailProps {
 const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [priceHistory, setPriceHistory] = useState<PriceHistoryEntry[]>([]);
+  const [ebayMetrics, setEbayMetrics] = useState<EbayMetricsEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [backfilling, setBackfilling] = useState(false);
-  const [backfillAttempted, setBackfillAttempted] = useState(false);
+  const backfillAttemptedRef = useRef(false);
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
 
-      // Fetch sales and price history in parallel
-      const [salesData, historyData] = await Promise.all([
+      // Fetch sales, price history, and eBay metrics in parallel
+      const [salesData, historyData, ebayData] = await Promise.all([
         getSalesForItem(item.id),
         getPriceHistory(item.id),
+        getEbayMetricsHistory(item.id),
       ]);
 
       setSales(salesData);
       setPriceHistory(historyData);
+      setEbayMetrics(ebayData);
       setLoading(false);
 
       // Auto-backfill if no sales but item has totalSold > 0
-      if (salesData.length === 0 && item.totalSold > 0 && !backfillAttempted) {
-        setBackfillAttempted(true);
+      if (salesData.length === 0 && item.totalSold > 0 && !backfillAttemptedRef.current) {
+        backfillAttemptedRef.current = true;
         setBackfilling(true);
         try {
           const result = await backfillSalesForItem(item.id, item.itemName);
@@ -77,7 +80,7 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
       }
     };
     fetchData();
-  }, [item.id, item.itemName, item.totalSold, backfillAttempted]);
+  }, [item.id, item.itemName, item.totalSold]);
 
   if (loading || backfilling) {
     return (
@@ -111,6 +114,7 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
 
   // Sales data points (salePrice, buyPlusShip)
   const salesData = salesWithCost.map((sale, index) => ({
+    id: `sale-${sale.orderNumber || index}`,
     timestamp: new Date(sale.saleDate).getTime(),
     date: new Date(sale.saleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }),
     fullDate: new Date(sale.saleDate).toLocaleDateString(),
@@ -127,8 +131,9 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
   // Map ALL priceHistory entries for trend line (from subcollection)
   const priceHistoryData: typeof salesData = [];
   if (priceHistory && priceHistory.length > 0) {
-    for (const entry of priceHistory) {
+    priceHistory.forEach((entry, index) => {
       priceHistoryData.push({
+        id: `price-${new Date(entry.checkedAt).getTime()}-${index}`,
         timestamp: new Date(entry.checkedAt).getTime(),
         date: new Date(entry.checkedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }),
         fullDate: new Date(entry.checkedAt).toLocaleDateString(),
@@ -141,11 +146,32 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
         carPartAvgPrice: entry.avgPrice || null,
         views30Day: entry.views30Day ?? null,
       });
-    }
+    });
   }
 
-  // Combine sales and price history, sort by timestamp
-  const chartData = [...salesData, ...priceHistoryData].sort((a, b) => a.timestamp - b.timestamp);
+  // Map eBay metrics entries (from ebayMetrics subcollection)
+  const ebayMetricsData: typeof salesData = [];
+  if (ebayMetrics && ebayMetrics.length > 0) {
+    ebayMetrics.forEach((entry, index) => {
+      ebayMetricsData.push({
+        id: `ebay-${new Date(entry.recordedAt).getTime()}-${index}`,
+        timestamp: new Date(entry.recordedAt).getTime(),
+        date: new Date(entry.recordedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }),
+        fullDate: new Date(entry.recordedAt).toLocaleDateString(),
+        salePrice: null,
+        buyPlusShip: null,
+        profit: null,
+        margin: null,
+        cumProfit: null,
+        orderNumber: null,
+        carPartAvgPrice: null,
+        views30Day: entry.views30Day,
+      });
+    });
+  }
+
+  // Combine sales, price history, and eBay metrics, sort by timestamp
+  const chartData = [...salesData, ...priceHistoryData, ...ebayMetricsData].sort((a, b) => a.timestamp - b.timestamp);
 
   // Get time domain - include both sales and price history dates
   const allTimestamps = chartData.map(d => d.timestamp);
@@ -353,8 +379,8 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {sales.map((sale, idx) => (
-                <TableRow key={idx} hover>
+              {sales.map((sale) => (
+                <TableRow key={sale.orderNumber || `${sale.saleDate}-${sale.salePrice}`} hover>
                   <TableCell>{new Date(sale.saleDate).toLocaleDateString()}</TableCell>
                   <TableCell align="right">{formatCurrency(sale.salePrice || 0)}</TableCell>
                   <TableCell align="right">{formatCurrency((sale.purchaseCost || 0) + (sale.shipCost || 0))}</TableCell>

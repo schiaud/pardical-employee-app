@@ -58,6 +58,7 @@ const convertToItemStats = (data: ItemStatsFirestore): ItemStats => ({
     checkedAt: entry.checkedAt?.toDate?.() || new Date(),
   })),
   ebayListingUpdatedAt: data.ebayListingUpdatedAt?.toDate?.(),
+  reviewedAt: data.reviewedAt?.toDate?.(),
 });
 
 // Convert sale record from Firestore
@@ -195,6 +196,15 @@ export const updateItemThreshold = async (
   const docRef = doc(db, ITEM_STATS_COLLECTION, itemId);
   await updateDoc(docRef, {
     staleThresholdDays: threshold,
+    updatedAt: Timestamp.now(),
+  });
+};
+
+// Mark item as reviewed
+export const markItemReviewed = async (itemId: string): Promise<void> => {
+  const docRef = doc(db, ITEM_STATS_COLLECTION, itemId);
+  await updateDoc(docRef, {
+    reviewedAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   });
 };

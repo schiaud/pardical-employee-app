@@ -56,6 +56,8 @@ export interface ItemStats {
   // eBay listing flag (for filtering)
   inEbayListings?: boolean;
   ebayListingUpdatedAt?: Date;
+  // Review tracking
+  reviewedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -103,6 +105,8 @@ export interface ItemStatsFirestore {
   // eBay listing flag
   inEbayListings?: boolean;
   ebayListingUpdatedAt?: Timestamp;
+  // Review tracking
+  reviewedAt?: Timestamp;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -115,7 +119,7 @@ export interface StaleItemsSummary {
   itemsWithEbayData: number;
 }
 
-export type StaleThreshold = 30 | 60 | 90;
+export type StaleThreshold = 90 | 180 | 365;  // 3 months, 6 months, 1 year
 
 export interface CarPartVariant {
   label: string;

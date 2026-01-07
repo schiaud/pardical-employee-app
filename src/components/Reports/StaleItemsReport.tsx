@@ -8,6 +8,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   Paper,
   CircularProgress,
   Box,
@@ -20,6 +21,8 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
+  FormControlLabel,
+  Checkbox,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -54,6 +57,7 @@ import {
   runMigration,
   getLatestPricingData,
   getLatestEbayMetrics,
+  markItemReviewed,
 } from '../../services/staleItems';
 import {
   ItemStats,
@@ -73,6 +77,10 @@ export const StaleItemsReport: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [thresholdFilter, setThresholdFilter] = useState<StaleThreshold | 'all'>('all');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<'daysSinceLastSale' | 'lastSaleDate' | 'reviewedAt'>('daysSinceLastSale');
+  const [showHighSellers, setShowHighSellers] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
 
   // Price check dialog state
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
@@ -177,15 +185,48 @@ export const StaleItemsReport: React.FC = () => {
 
     if (thresholdFilter !== 'all') {
       filtered = filtered.filter(
-        (item) => item.daysSinceLastSale >= thresholdFilter
+        (item) => item.daysSinceLastSale <= thresholdFilter
       );
     }
 
+    // Filter by total sold: unchecked = ≤10, checked = >10
+    if (showHighSellers) {
+      filtered = filtered.filter((item) => item.totalSold > 10);
+    } else {
+      filtered = filtered.filter((item) => item.totalSold <= 10);
+    }
+
+    // Apply sorting
+    if (sortBy === 'lastSaleDate') {
+      filtered.sort((a, b) => b.lastSaleDate.getTime() - a.lastSaleDate.getTime());
+    } else if (sortBy === 'reviewedAt') {
+      // Never-reviewed first, then oldest reviewed
+      filtered.sort((a, b) => {
+        if (!a.reviewedAt && !b.reviewedAt) return 0;
+        if (!a.reviewedAt) return -1;
+        if (!b.reviewedAt) return 1;
+        return a.reviewedAt.getTime() - b.reviewedAt.getTime();
+      });
+    } else {
+      // Default: daysSinceLastSale desc
+      filtered.sort((a, b) => b.daysSinceLastSale - a.daysSinceLastSale);
+    }
+
     setFilteredItems(filtered);
-  }, [searchTerm, thresholdFilter, items]);
+    setPage(0);
+  }, [searchTerm, thresholdFilter, items, showHighSellers, sortBy]);
 
   const handleThresholdChange = (event: SelectChangeEvent<StaleThreshold | 'all'>) => {
     setThresholdFilter(event.target.value as StaleThreshold | 'all');
+  };
+
+  const handleMarkReviewed = async (itemId: string) => {
+    await markItemReviewed(itemId);
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId ? { ...item, reviewedAt: new Date() } : item
+      )
+    );
   };
 
   const handlePriceCheck = (item: ItemStats) => {
@@ -425,14 +466,14 @@ export const StaleItemsReport: React.FC = () => {
         </Alert>
       )}
 
-      <Box display="flex" gap={2} mb={3}>
+      <Box display="flex" gap={2} mb={3} flexWrap="wrap" alignItems="center">
         <TextField
-          fullWidth
           variant="outlined"
           placeholder="Search items..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           size="small"
+          sx={{ minWidth: 200, flex: 1 }}
         />
         <FormControl size="small" sx={{ minWidth: 150 }}>
           <InputLabel>Threshold</InputLabel>
@@ -442,11 +483,33 @@ export const StaleItemsReport: React.FC = () => {
             onChange={handleThresholdChange}
           >
             <MenuItem value="all">All Items</MenuItem>
-            <MenuItem value={30}>30+ Days</MenuItem>
-            <MenuItem value={60}>60+ Days</MenuItem>
-            <MenuItem value={90}>90+ Days</MenuItem>
+            <MenuItem value={90}>Less than 3 months</MenuItem>
+            <MenuItem value={180}>Less than 6 months</MenuItem>
+            <MenuItem value={365}>Less than 1 year</MenuItem>
           </Select>
         </FormControl>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel>Sort By</InputLabel>
+          <Select
+            value={sortBy}
+            label="Sort By"
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+          >
+            <MenuItem value="daysSinceLastSale">Days Since Last Sale</MenuItem>
+            <MenuItem value="lastSaleDate">Last Sale Date</MenuItem>
+            <MenuItem value="reviewedAt">Never Reviewed First</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={showHighSellers}
+              onChange={(e) => setShowHighSellers(e.target.checked)}
+              size="small"
+            />
+          }
+          label="Show >10 sold"
+        />
       </Box>
 
       {filteredItems.length === 0 ? (
@@ -472,10 +535,13 @@ export const StaleItemsReport: React.FC = () => {
                   <TableCell align="center">Car-Part Price</TableCell>
                   <TableCell align="center">eBay Views</TableCell>
                   <TableCell align="center">Actions</TableCell>
+                  <TableCell align="center">Reviewed</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filteredItems.map((item) => (
+                {filteredItems
+                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                  .map((item) => (
                   <React.Fragment key={item.id}>
                     <TableRow
                       sx={{
@@ -571,9 +637,19 @@ export const StaleItemsReport: React.FC = () => {
                           )}
                         </Box>
                       </TableCell>
+                      <TableCell align="center">
+                        <Tooltip title={item.reviewedAt ? `Reviewed: ${formatRelativeDate(item.reviewedAt)}` : 'Mark reviewed'}>
+                          <Checkbox
+                            checked={!!item.reviewedAt}
+                            onChange={() => handleMarkReviewed(item.id)}
+                            size="small"
+                            color={item.reviewedAt ? 'success' : 'default'}
+                          />
+                        </Tooltip>
+                      </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell colSpan={8} sx={{ py: 0, border: 0 }}>
+                      <TableCell colSpan={9} sx={{ py: 0, border: 0 }}>
                         <Collapse
                           in={expandedRow === item.id}
                           timeout="auto"
@@ -588,6 +664,18 @@ export const StaleItemsReport: React.FC = () => {
               </TableBody>
             </Table>
           </TableContainer>
+          <TablePagination
+            rowsPerPageOptions={[50, 100]}
+            component="div"
+            count={filteredItems.length}
+            rowsPerPage={rowsPerPage}
+            page={page}
+            onPageChange={(_, newPage) => setPage(newPage)}
+            onRowsPerPageChange={(e) => {
+              setRowsPerPage(parseInt(e.target.value, 10));
+              setPage(0);
+            }}
+          />
         </>
       )}
 
