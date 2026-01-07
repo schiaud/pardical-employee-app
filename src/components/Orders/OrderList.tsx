@@ -23,10 +23,9 @@ import { db } from '../../services/firebase';
 import { Order } from '../../types';
 import { OrderCard } from './OrderCard';
 import { CreateOrderDialog } from './CreateOrderDialog';
-import { StaleItemsWidget } from './StaleItemsWidget';
 import { useAuth } from '../Auth/AuthContext';
 
-type FilterType = 'new' | 'notShipped' | 'returns' | 'all60Days' | 'all' | 'myOrders';
+type FilterType = 'new' | 'notShipped' | 'returns' | 'all60Days' | 'all6Months' | 'all' | 'myOrders';
 
 export const OrderList: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -39,6 +38,7 @@ export const OrderList: React.FC = () => {
     notShipped: 0,
     returns: 0,
     all60Days: 0,
+    all6Months: 0,
     all: 0,
     myOrders: 0,
   });
@@ -81,6 +81,16 @@ export const OrderList: React.FC = () => {
           q = query(
             ordersRef,
             where('paidDate', '>=', sixtyDaysAgo.toISOString())
+          );
+          break;
+
+        case 'all6Months':
+          // Orders from last 6 months
+          const sixMonthsAgo = new Date();
+          sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+          q = query(
+            ordersRef,
+            where('paidDate', '>=', sixMonthsAgo.toISOString())
           );
           break;
 
@@ -150,7 +160,8 @@ export const OrderList: React.FC = () => {
       new: orders.filter(o => !o.employee || o.employee.trim() === '' || o.employee.trim() === 'n/a').length,
       notShipped: orders.filter(o => !['completed', 'shipped', 'delivered', 'return done'].includes(o.status)).length,
       returns: orders.filter(o => o.status === 'return').length,
-      all60Days: orders.length, // This would need proper filtering
+      all60Days: orders.length,
+      all6Months: orders.length,
       all: orders.length,
       myOrders: orders.filter(o => o.employee === user?.displayName).length,
     };
@@ -163,6 +174,7 @@ export const OrderList: React.FC = () => {
     { key: 'returns' as FilterType, label: 'Returns' },
     { key: 'myOrders' as FilterType, label: 'My Orders' },
     { key: 'all60Days' as FilterType, label: 'All (60 Days)' },
+    { key: 'all6Months' as FilterType, label: 'All (6 Months)' },
     { key: 'all' as FilterType, label: 'All Orders' },
   ];
 
@@ -233,7 +245,7 @@ export const OrderList: React.FC = () => {
               }}
             >
               {label}
-              {counts[key] > 0 && (
+              {counts[key] > 0 && !['all60Days', 'all6Months', 'all'].includes(key) && (
                 <Badge
                   badgeContent={counts[key]}
                   color="error"
@@ -257,8 +269,6 @@ export const OrderList: React.FC = () => {
           Showing {orders.length} orders
         </Typography>
       </Box>
-
-      <StaleItemsWidget />
 
       {orders.length === 0 ? (
         <Alert
