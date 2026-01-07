@@ -382,16 +382,16 @@ async function searchCarPartCom(
     $ = cheerioLoad(response2.data);
   }
 
-  // Detect total pages from page 1 response
-  const totalPages = detectTotalPages($);
-  logger.info(`Detected ${totalPages} total pages for search`);
+  // Detect last page with prices (uses asterisk marker from car-part.com)
+  const lastPageWithPrices = detectLastPageWithPrices($);
+  logger.info(`Last page with prices: ${lastPageWithPrices}`);
 
   // Parse page 1 results (we already have this response)
   const page1Listings = parseResultRows($);
   logger.info(`Page 1: ${page1Listings.length} listings`);
 
   // If only 1 page, just return page 1 results
-  if (totalPages <= 1) {
+  if (lastPageWithPrices <= 1) {
     return {
       listings: page1Listings,
       totalPages: 1,
@@ -399,11 +399,12 @@ async function searchCarPartCom(
   }
 
   // Determine which additional pages to fetch (page 1 already fetched)
-  const pagesToFetch = selectPagesToFetch(totalPages);
+  const pagesToFetch = selectPagesToFetch(lastPageWithPrices);
   logger.info(`Fetching additional pages: ${pagesToFetch.join(", ")}`);
 
-  // Collect all listings, starting with page 1 results
-  const allListings: CarPartListing[] = [...page1Listings];
+  // Only include page 1 listings if lastPageWithPrices <= 4 (part of last 4 pages)
+  // For >4 pages, we only want the last 4 pages (lowest priced)
+  const allListings: CarPartListing[] = lastPageWithPrices <= 4 ? [...page1Listings] : [];
 
   for (const pageNum of pagesToFetch) {
     // Rate limiting: 1 second delay between requests
@@ -428,7 +429,7 @@ async function searchCarPartCom(
 
   return {
     listings: allListings,
-    totalPages,
+    totalPages: lastPageWithPrices,
   };
 }
 
@@ -502,7 +503,63 @@ function parseResultRows($: cheerio.Root): CarPartListing[] {
 }
 
 /**
- * Detect total number of pages from car-part.com HTML
+ * Detect the last page with prices from car-part.com HTML
+ * Car-part.com marks the last page with prices using asterisk (e.g., "*61")
+ * HTML structure: <span style="background-color: #c0c0c0">*<a href="...">61</a></span>
+ * The asterisk is OUTSIDE the <a> tag but INSIDE the <span>
+ */
+function detectLastPageWithPrices($: cheerio.Root): number {
+  let lastPageWithPrices = 0;
+
+  // APPROACH 1: Search span elements (where asterisk is placed)
+  $("span").each((_, el) => {
+    const text = $(el).text().trim();
+    // Look for asterisk followed by number
+    if (text.includes("*")) {
+      const match = text.match(/\*(\d+)/);
+      if (match) {
+        const pageNum = parseInt(match[1], 10);
+        if (pageNum > lastPageWithPrices) {
+          lastPageWithPrices = pageNum;
+          logger.info(`Found asterisk-marked page in span: ${pageNum} (text: "${text}")`);
+        }
+      }
+    }
+  });
+
+  // APPROACH 2: Search all text nodes for *N pattern (fallback)
+  if (lastPageWithPrices === 0) {
+    const bodyText = $("body").text();
+    const matches = bodyText.match(/\*(\d+)/g);
+    if (matches) {
+      // Find the highest number with asterisk
+      for (const m of matches) {
+        const numMatch = m.match(/\*(\d+)/);
+        if (numMatch) {
+          const pageNum = parseInt(numMatch[1], 10);
+          if (pageNum > lastPageWithPrices) {
+            lastPageWithPrices = pageNum;
+          }
+        }
+      }
+      if (lastPageWithPrices > 0) {
+        logger.info(`Found asterisk-marked page in body text: ${lastPageWithPrices}`);
+      }
+    }
+  }
+
+  // APPROACH 3: Fallback to total pages detection
+  if (lastPageWithPrices === 0) {
+    logger.info("No asterisk marker found, falling back to total pages detection");
+    return detectTotalPages($);
+  }
+
+  logger.info(`Detected last page with prices: ${lastPageWithPrices}`);
+  return lastPageWithPrices;
+}
+
+/**
+ * Detect total number of pages from car-part.com HTML (fallback)
  */
 function detectTotalPages($: cheerio.Root): number {
   // Look for "Page X of Y" pattern in page text
@@ -545,17 +602,17 @@ function detectTotalPages($: cheerio.Root): number {
 /**
  * Select which pages to fetch based on total page count
  * Page 1 is already fetched from initial request, so this returns ADDITIONAL pages
- * For 1-3 pages: fetch all remaining pages [2, 3]
- * For 4-10 pages: skip last page (lowest prices)
- * For 11+ pages: sample 2nd highest, 2 middle, 2nd and 3rd lowest
+ * Strategy: Use last 4 pages (lowest priced) for averaging
+ * For ≤4 pages: fetch all remaining pages
+ * For >4 pages: fetch only the last 4 pages
  */
 function selectPagesToFetch(totalPages: number): number[] {
   if (totalPages <= 1) {
     return []; // Page 1 already fetched
   }
 
-  // For 2-3 pages: fetch ALL remaining pages (page 1 already fetched)
-  if (totalPages <= 3) {
+  // For 4 or fewer pages: fetch ALL remaining pages (page 1 already fetched)
+  if (totalPages <= 4) {
     const pages: number[] = [];
     for (let i = 2; i <= totalPages; i++) {
       pages.push(i);
@@ -563,18 +620,8 @@ function selectPagesToFetch(totalPages: number): number[] {
     return pages;
   }
 
-  if (totalPages >= 11) {
-    // 2nd highest (page 2), 2 middle (ceiling), 2nd and 3rd lowest
-    const middle = Math.ceil(totalPages / 2);
-    return [2, middle, middle + 1, totalPages - 2, totalPages - 1];
-  }
-
-  // 4-10 pages: skip last page (lowest price outliers)
-  const pages: number[] = [];
-  for (let i = 2; i < totalPages; i++) {
-    pages.push(i);
-  }
-  return pages;
+  // For >4 pages: fetch ONLY the last 4 pages (lowest priced)
+  return [totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
 }
 
 /**
