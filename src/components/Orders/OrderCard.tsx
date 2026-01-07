@@ -138,6 +138,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
         shipPrice,
         status,
         notes,
+        updatedAt: new Date().toISOString(),
       });
     } catch (error) {
       console.error('Error updating order:', error);
@@ -470,6 +471,11 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {order.updatedAt && (
+            <Typography sx={{ fontSize: '10px', color: '#52525b', mr: 1 }}>
+              Updated: {new Date(order.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            </Typography>
+          )}
           <Button
             variant="contained"
             color="error"

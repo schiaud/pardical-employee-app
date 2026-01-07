@@ -35,6 +35,7 @@ export interface Order {
   paidDate: string;
   dueDate?: string;
   time?: string | Date;
+  updatedAt?: string;
   
   // Tracking Information
   tracking?: string;
