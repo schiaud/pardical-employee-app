@@ -21,9 +21,10 @@ const daysBetween = (date1: Date, date2: Date): number => {
   return Math.floor(Math.abs(date1.getTime() - date2.getTime()) / oneDay);
 };
 
-// Helper to parse currency strings to numbers
-const parseCurrency = (value: string | undefined): number => {
-  if (!value) return 0;
+// Helper to parse currency strings/numbers to numbers
+const parseCurrency = (value: string | number | undefined): number => {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === 'number') return value;
   const num = parseFloat(value.replace(/[^\d.-]/g, ""));
   return isNaN(num) ? 0 : num;
 };
@@ -599,6 +600,228 @@ export const migrateOrdersToItemStats = onCall(
       salesCreated: saleCount,
       ordersProcessed: processed,
       ordersSkipped: skippedOld,
+    };
+  }
+);
+
+/**
+ * HTTP Callable: Migrate ALL orders to itemStats (no date filter)
+ * Creates itemStats with sales subcollections and profit tracking
+ * Handles orders without paidDate by using createdAt or current date as fallback
+ */
+export const migrateAllOrdersToItemStats = onCall(
+  {cors: true, timeoutSeconds: 540, memory: "1GiB"},
+  async () => {
+    logger.info("Starting FULL orders migration to itemStats (all time, no date filter)");
+
+    const ordersSnapshot = await db.collection("orders").get();
+
+    // Structure to hold aggregated data
+    interface OrderData {
+      orderId: string;
+      orderNumber?: string;
+      saleDate: Date;
+      salePrice: number;
+      purchaseCost: number;
+      shipCost: number;
+      profit: number;
+      profitMargin: number;
+    }
+
+    const itemMap = new Map<string, {
+      itemName: string;
+      itemId?: string;
+      orders: OrderData[];
+      totalSold: number;
+      lastSaleDate: Date;
+      firstSaleDate: Date;
+      totalRevenue: number;
+      totalCost: number;
+      totalProfit: number;
+      salesByWeek: Record<string, number>;
+      salesByMonth: Record<string, number>;
+    }>();
+
+    let skippedNoItem = 0;
+    let processed = 0;
+    let usedFallbackDate = 0;
+
+    // Aggregate orders by item - NO DATE FILTER
+    ordersSnapshot.forEach((doc) => {
+      const data = doc.data();
+      const itemName = data.item;
+
+      // Skip orders without item name
+      if (!itemName) {
+        skippedNoItem++;
+        return;
+      }
+
+      // Use paidDate if available, otherwise use createdAt or current date
+      let saleDate: Date;
+      if (data.paidDate) {
+        saleDate = new Date(data.paidDate);
+      } else if (data.createdAt?.toDate) {
+        saleDate = data.createdAt.toDate();
+        usedFallbackDate++;
+      } else if (data.createdAt) {
+        saleDate = new Date(data.createdAt);
+        usedFallbackDate++;
+      } else {
+        saleDate = new Date();
+        usedFallbackDate++;
+      }
+
+      processed++;
+      const normalizedId = normalizeItemName(itemName);
+
+      // Parse financial data
+      const salePrice = parseCurrency(data.earnings);
+      const purchaseCost = parseCurrency(data.buyPrice);
+      const shipCost = parseCurrency(data.shipPrice);
+      const profit = salePrice - purchaseCost - shipCost;
+      const profitMargin = salePrice > 0 ? (profit / salePrice) * 100 : 0;
+
+      const orderData: OrderData = {
+        orderId: doc.id,
+        orderNumber: data.orderNumber,
+        saleDate,
+        salePrice,
+        purchaseCost,
+        shipCost,
+        profit,
+        profitMargin,
+      };
+
+      const weekKey = getWeekKey(saleDate);
+      const monthKey = getMonthKey(saleDate);
+
+      const existing = itemMap.get(normalizedId);
+      if (existing) {
+        existing.orders.push(orderData);
+        existing.totalSold++;
+        existing.totalRevenue += salePrice;
+        existing.totalCost += purchaseCost + shipCost;
+        existing.totalProfit += profit;
+        existing.salesByWeek[weekKey] = (existing.salesByWeek[weekKey] || 0) + 1;
+        existing.salesByMonth[monthKey] =
+          (existing.salesByMonth[monthKey] || 0) + 1;
+        if (saleDate > existing.lastSaleDate) {
+          existing.lastSaleDate = saleDate;
+        }
+        if (saleDate < existing.firstSaleDate) {
+          existing.firstSaleDate = saleDate;
+        }
+      } else {
+        itemMap.set(normalizedId, {
+          itemName,
+          itemId: data.itemId,
+          orders: [orderData],
+          totalSold: 1,
+          lastSaleDate: saleDate,
+          firstSaleDate: saleDate,
+          totalRevenue: salePrice,
+          totalCost: purchaseCost + shipCost,
+          totalProfit: profit,
+          salesByWeek: {[weekKey]: 1},
+          salesByMonth: {[monthKey]: 1},
+        });
+      }
+    });
+
+    logger.info(`Processed ${processed} orders, skipped ${skippedNoItem} without item name`);
+    logger.info(`Used fallback date for ${usedFallbackDate} orders without paidDate`);
+    logger.info(`Found ${itemMap.size} unique items`);
+
+    // Write to itemStats in batches
+    const now = admin.firestore.Timestamp.now();
+    let itemCount = 0;
+    let saleCount = 0;
+    let batch = db.batch();
+    let batchCount = 0;
+
+    for (const [id, stats] of itemMap) {
+      const daysSinceLastSale = daysBetween(new Date(), stats.lastSaleDate);
+      const daysSinceFirst = Math.max(
+        1,
+        daysBetween(new Date(), stats.firstSaleDate)
+      );
+      const weeksActive = Math.max(1, daysSinceFirst / 7);
+      const salesVelocity = stats.totalSold / weeksActive;
+      const avgProfitMargin = stats.totalRevenue > 0 ?
+        (stats.totalProfit / stats.totalRevenue) * 100 : 0;
+
+      const ref = db.collection("itemStats").doc(id);
+      batch.set(ref, {
+        id,
+        itemName: stats.itemName,
+        itemId: stats.itemId || null,
+        totalSold: stats.totalSold,
+        lastSaleDate: admin.firestore.Timestamp.fromDate(stats.lastSaleDate),
+        firstSaleDate: admin.firestore.Timestamp.fromDate(stats.firstSaleDate),
+        salesLast30Days: stats.totalSold,
+        salesLast90Days: stats.totalSold,
+        daysSinceLastSale,
+        salesVelocity: Math.round(salesVelocity * 10) / 10,
+        isStale: daysSinceLastSale >= 30,
+        staleThresholdDays: 30,
+        // Profit aggregates
+        totalRevenue: Math.round(stats.totalRevenue * 100) / 100,
+        totalCost: Math.round(stats.totalCost * 100) / 100,
+        totalProfit: Math.round(stats.totalProfit * 100) / 100,
+        avgProfitMargin: Math.round(avgProfitMargin * 10) / 10,
+        // Sales by period
+        salesByWeek: stats.salesByWeek,
+        salesByMonth: stats.salesByMonth,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      batchCount++;
+      itemCount++;
+
+      // Create sale records in subcollection
+      for (const order of stats.orders) {
+        const saleRef = ref.collection("sales").doc(order.orderId);
+        batch.set(saleRef, {
+          id: order.orderId,
+          orderRef: `orders/${order.orderId}`,
+          orderNumber: order.orderNumber || null,
+          salePrice: order.salePrice,
+          purchaseCost: order.purchaseCost || null,
+          shipCost: order.shipCost || null,
+          profit: Math.round(order.profit * 100) / 100,
+          profitMargin: Math.round(order.profitMargin * 10) / 10,
+          saleDate: admin.firestore.Timestamp.fromDate(order.saleDate),
+          createdAt: now,
+        });
+        batchCount++;
+        saleCount++;
+
+        // Commit batch if approaching limit
+        if (batchCount >= 450) {
+          await batch.commit();
+          logger.info(`Committed batch: ${itemCount} items, ${saleCount} sales`);
+          batch = db.batch();
+          batchCount = 0;
+        }
+      }
+    }
+
+    // Commit remaining
+    if (batchCount > 0) {
+      await batch.commit();
+      logger.info(`Committed final batch: ${itemCount} items, ${saleCount} sales`);
+    }
+
+    logger.info(`Full migration completed: ${itemCount} items, ${saleCount} sales`);
+    return {
+      success: true,
+      itemsCreated: itemCount,
+      salesCreated: saleCount,
+      ordersProcessed: processed,
+      ordersSkippedNoItem: skippedNoItem,
+      ordersUsedFallbackDate: usedFallbackDate,
     };
   }
 );

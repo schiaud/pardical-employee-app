@@ -9,6 +9,7 @@ export {
   updateItemStatsOnOrder,
   calculateDailyStaleMetrics,
   migrateOrdersToItemStats,
+  migrateAllOrdersToItemStats,
   weeklyPriceCheck,
   backfillSalesForItem,
 } from "./itemStats";

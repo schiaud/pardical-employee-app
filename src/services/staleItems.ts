@@ -393,6 +393,40 @@ export const runMigration = async (): Promise<{
   }
 };
 
+// Run FULL migration to populate itemStats from ALL orders (no date filter)
+export const runFullMigration = async (): Promise<{
+  success: boolean;
+  itemsCreated?: number;
+  salesCreated?: number;
+  ordersProcessed?: number;
+  ordersSkippedNoItem?: number;
+  ordersUsedFallbackDate?: number;
+  error?: string;
+}> => {
+  try {
+    const functions = getFunctions();
+    const migrate = httpsCallable<
+      object,
+      {
+        success: boolean;
+        itemsCreated: number;
+        salesCreated: number;
+        ordersProcessed: number;
+        ordersSkippedNoItem: number;
+        ordersUsedFallbackDate: number;
+      }
+    >(functions, 'migrateAllOrdersToItemStats');
+    const result = await migrate({});
+    return result.data;
+  } catch (error) {
+    console.error('Full migration error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+};
+
 // Get items that are currently in eBay listings
 export const getEbayListedItems = async (): Promise<ItemStats[]> => {
   try {

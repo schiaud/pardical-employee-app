@@ -55,6 +55,7 @@ import {
   savePriceCheck,
   importEbayData,
   runMigration,
+  runFullMigration,
   getLatestPricingData,
   getLatestEbayMetrics,
   markItemReviewed,
@@ -112,6 +113,7 @@ export const StaleItemsReport: React.FC = () => {
 
   // Migration state
   const [migrationLoading, setMigrationLoading] = useState(false);
+  const [fullMigrationLoading, setFullMigrationLoading] = useState(false);
 
   // Subcollection data (fetched separately from main items)
   const [pricingData, setPricingData] = useState<Map<string, PriceHistoryEntry>>(new Map());
@@ -410,6 +412,24 @@ export const StaleItemsReport: React.FC = () => {
     }
   };
 
+  const handleRunFullMigration = async () => {
+    setFullMigrationLoading(true);
+    try {
+      const result = await runFullMigration();
+      if (result.success) {
+        alert(`Migration complete!\n\nItems created: ${result.itemsCreated}\nSales records: ${result.salesCreated}\nOrders processed: ${result.ordersProcessed}\nOrders without item: ${result.ordersSkippedNoItem}\nUsed fallback date: ${result.ordersUsedFallbackDate}`);
+        await fetchItems();
+      } else if (result.error) {
+        setError(result.error);
+      }
+    } catch (err) {
+      console.error('Full migration error:', err);
+      setError('Failed to run full migration');
+    } finally {
+      setFullMigrationLoading(false);
+    }
+  };
+
   const getRowColor = (daysSinceLastSale: number): string => {
     if (daysSinceLastSale < 30) return 'transparent';
     if (daysSinceLastSale < 60) return 'rgba(249, 115, 22, 0.1)';
@@ -447,6 +467,14 @@ export const StaleItemsReport: React.FC = () => {
               {migrationLoading ? 'Migrating...' : 'Run Migration'}
             </Button>
           )}
+          <Button
+            variant="contained"
+            color="secondary"
+            onClick={handleRunFullMigration}
+            disabled={fullMigrationLoading}
+          >
+            {fullMigrationLoading ? 'Migrating All...' : 'Sync All Items'}
+          </Button>
           <Button
             variant="outlined"
             startIcon={<UploadIcon />}
