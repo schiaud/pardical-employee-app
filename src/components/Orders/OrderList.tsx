@@ -48,8 +48,63 @@ export const OrderList: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    let q: Query<DocumentData>;
     const ordersRef = collection(db, 'orders');
+    const returnsRef = collection(db, 'returns');
+
+    // Special handling for returns filter - query both collections
+    if (filter === 'returns') {
+      let legacyOrders: Order[] = [];
+      let returnsOrders: Order[] = [];
+
+      const sortAndSetOrders = () => {
+        const combined = [...legacyOrders, ...returnsOrders];
+        combined.sort((a, b) => {
+          const dateA = new Date(a.paidDate || 0);
+          const dateB = new Date(b.paidDate || 0);
+          return dateA.getTime() - dateB.getTime();
+        });
+        setOrders(combined);
+        setLoading(false);
+      };
+
+      // Query 1: Legacy returns from orders collection (status = 'return')
+      const legacyQuery = query(ordersRef, where('status', '==', 'return'));
+      const unsubscribeLegacy = onSnapshot(
+        legacyQuery,
+        (snapshot) => {
+          legacyOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), _collection: 'orders' } as Order));
+          sortAndSetOrders();
+        },
+        (err) => {
+          console.error('Error fetching legacy returns:', err);
+          setError('Failed to load returns. Please check your permissions.');
+          setLoading(false);
+        }
+      );
+
+      // Query 2: All documents from returns collection (excluding completed ones)
+      const returnsQuery = query(returnsRef, where('status', '!=', 'return complete'));
+      const unsubscribeReturns = onSnapshot(
+        returnsQuery,
+        (snapshot) => {
+          returnsOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), _collection: 'returns' } as Order));
+          sortAndSetOrders();
+        },
+        (err) => {
+          console.error('Error fetching returns collection:', err);
+          // Don't set error for new collection - it might not exist yet
+          sortAndSetOrders();
+        }
+      );
+
+      return () => {
+        unsubscribeLegacy();
+        unsubscribeReturns();
+      };
+    }
+
+    // Standard single-collection queries for other filters
+    let q: Query<DocumentData>;
 
     try {
       switch (filter) {
@@ -67,11 +122,6 @@ export const OrderList: React.FC = () => {
             ordersRef,
             where('status', 'not-in', ['completed', 'shipped', 'return complete', 'return', 'delivered', 'return done'])
           );
-          break;
-
-        case 'returns':
-          // Return orders
-          q = query(ordersRef, where('status', '==', 'return'));
           break;
 
         case 'all60Days':

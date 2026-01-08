@@ -55,6 +55,9 @@ export interface Order {
   
   // Notes
   notes?: string;
+
+  // Internal tracking (not stored in Firestore)
+  _collection?: 'orders' | 'returns';
 }
 
 export interface User {

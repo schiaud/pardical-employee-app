@@ -16,10 +16,11 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PhoneIcon from '@mui/icons-material/Phone';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import EditIcon from '@mui/icons-material/Edit';
-import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, updateDoc, deleteDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import { useAuth } from '../Auth/AuthContext';
 import { CreateOrderDialog } from './CreateOrderDialog';
+import { ReplacementDialog } from './ReplacementDialog';
 import { Order, OrderStatus } from '../../types';
 
 interface OrderCardProps {
@@ -87,6 +88,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [replacementDialogOpen, setReplacementDialogOpen] = useState(false);
 
   // Editable fields state
   const [tracking, setTracking] = useState(order.tracking || '');
@@ -124,10 +126,11 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
     }
   };
 
-  const handleUpdate = async () => {
+  const performUpdate = async () => {
     setIsUpdating(true);
     try {
-      const orderRef = doc(db, 'orders', order.id);
+      const collectionName = order._collection || 'orders';
+      const orderRef = doc(db, collectionName, order.id);
       await updateDoc(orderRef, {
         tracking,
         carrier,
@@ -148,13 +151,93 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
     }
   };
 
+  const handleUpdate = async () => {
+    // Check if status is changing TO 'return' from something else
+    if (status === 'return' && order.status !== 'return') {
+      setReplacementDialogOpen(true);
+      return;
+    }
+    await performUpdate();
+  };
+
+  const handleReplacementConfirm = async (wantsReplacement: boolean) => {
+    setReplacementDialogOpen(false);
+
+    if (!wantsReplacement) {
+      // Just save as return normally
+      await performUpdate();
+      return;
+    }
+
+    // Customer wants replacement - do the full workflow
+    setIsUpdating(true);
+    try {
+      // 1. Copy FULL order to 'returns' collection with current edits
+      const returnData = {
+        ...order,
+        tracking,
+        carrier,
+        supplier,
+        supplierContact,
+        supplierPhone,
+        buyPrice,
+        shipPrice,
+        status: 'return' as OrderStatus,
+        notes,
+        returnedAt: new Date().toISOString(),
+        originalOrderId: order.id,
+      };
+      // Remove id field - Firestore will generate a new one
+      const { id, ...returnDataWithoutId } = returnData;
+      await addDoc(collection(db, 'returns'), returnDataWithoutId);
+
+      // 2. Reset original order to clean state for replacement
+      const orderRef = doc(db, 'orders', order.id);
+      const newNotes = `Replacement\n\nOld------\n${notes}`;
+      await updateDoc(orderRef, {
+        // Clear fulfillment fields
+        tracking: '',
+        carrier: '',
+        supplier: '',
+        supplierContact: '',
+        supplierPhone: '',
+        buyPrice: '',
+        shipPrice: '',
+        // Keep employee assigned
+        // Reset status
+        status: 'not shipped',
+        // Format notes
+        notes: newNotes,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // 3. Update local state to reflect changes
+      setTracking('');
+      setCarrier('');
+      setSupplier('');
+      setSupplierContact('');
+      setSupplierPhone('');
+      setBuyPrice('');
+      setShipPrice('');
+      setStatus('not shipped');
+      setNotes(newNotes);
+
+    } catch (error) {
+      console.error('Error processing replacement:', error);
+      alert('Failed to process replacement. Please try again.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!window.confirm('Are you sure you want to delete this order?')) {
       return;
     }
     setIsDeleting(true);
     try {
-      const orderRef = doc(db, 'orders', order.id);
+      const collectionName = order._collection || 'orders';
+      const orderRef = doc(db, collectionName, order.id);
       await deleteDoc(orderRef);
     } catch (error) {
       console.error('Error deleting order:', error);
@@ -545,6 +628,12 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
         open={editDialogOpen}
         onClose={() => setEditDialogOpen(false)}
         order={order}
+      />
+
+      <ReplacementDialog
+        open={replacementDialogOpen}
+        onClose={() => setReplacementDialogOpen(false)}
+        onConfirm={handleReplacementConfirm}
       />
     </Card>
   );
