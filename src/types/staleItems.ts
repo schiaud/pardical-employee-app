@@ -191,6 +191,7 @@ export interface PriceHistoryEntry {
   minPrice: number;
   maxPrice: number;
   totalListings: number;
+  totalPages?: number | null;
   checkedAt: Date;
   // eBay views at this point in time (null if no eBay data)
   views30Day?: number | null;
@@ -203,6 +204,7 @@ export interface PriceHistoryEntryFirestore {
   minPrice: number;
   maxPrice: number;
   totalListings: number;
+  totalPages?: number | null;
   checkedAt: Timestamp;
   views30Day?: number | null;
   source?: 'carpart' | 'ebay' | 'both';

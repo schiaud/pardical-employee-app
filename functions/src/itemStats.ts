@@ -1019,3 +1019,65 @@ export const weeklyPriceCheck = onSchedule(
     logger.info(`Weekly price check completed: ${updated} updated, ${errors} errors`);
   }
 );
+
+/**
+ * Scheduled Function: Auto-unreview items that haven't sold since being reviewed
+ * Items reviewed 60+ days ago with no sale since review get their reviewedAt cleared
+ * Runs daily at 4 AM
+ */
+export const autoUnreviewStaleItems = onSchedule(
+  {
+    schedule: "0 4 * * *", // Every day at 4 AM
+    timeZone: "America/Chicago",
+  },
+  async () => {
+    logger.info("Starting auto-unreview check for stale reviewed items");
+
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+    const sixtyDaysAgoTimestamp = admin.firestore.Timestamp.fromDate(sixtyDaysAgo);
+
+    // Get all items that were reviewed more than 60 days ago
+    const reviewedItemsSnapshot = await db
+      .collection("itemStats")
+      .where("reviewedAt", "<=", sixtyDaysAgoTimestamp)
+      .get();
+
+    logger.info(`Found ${reviewedItemsSnapshot.size} items reviewed 60+ days ago`);
+
+    let batch = db.batch();
+    let batchCount = 0;
+    let unreviewedCount = 0;
+
+    for (const doc of reviewedItemsSnapshot.docs) {
+      const data = doc.data();
+      const reviewedAt = data.reviewedAt?.toDate();
+      const lastSaleDate = data.lastSaleDate?.toDate();
+
+      // Only unreview if no sale has occurred since the review
+      if (reviewedAt && lastSaleDate && lastSaleDate < reviewedAt) {
+        batch.update(doc.ref, {
+          reviewedAt: admin.firestore.FieldValue.delete(),
+          updatedAt: admin.firestore.Timestamp.now(),
+        });
+        unreviewedCount++;
+        batchCount++;
+
+        // Commit batch if approaching limit
+        if (batchCount >= 450) {
+          await batch.commit();
+          logger.info(`Committed batch: ${unreviewedCount} items unreviewed`);
+          batch = db.batch();
+          batchCount = 0;
+        }
+      }
+    }
+
+    // Commit remaining
+    if (batchCount > 0) {
+      await batch.commit();
+    }
+
+    logger.info(`Auto-unreview completed: ${unreviewedCount} items unreviewed`);
+  }
+);

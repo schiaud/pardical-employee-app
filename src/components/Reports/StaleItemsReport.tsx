@@ -21,7 +21,6 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
-  FormControlLabel,
   Checkbox,
   Dialog,
   DialogTitle,
@@ -73,13 +72,14 @@ import ItemSalesDetail from './ItemSalesDetail';
 export const StaleItemsReport: React.FC = () => {
   const [items, setItems] = useState<ItemStats[]>([]);
   const [filteredItems, setFilteredItems] = useState<ItemStats[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [thresholdFilter, setThresholdFilter] = useState<StaleThreshold | 'all'>('all');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'daysSinceLastSale' | 'lastSaleDate' | 'reviewedAt'>('daysSinceLastSale');
-  const [showHighSellers, setShowHighSellers] = useState(false);
+  const [minSoldFilter, setMinSoldFilter] = useState<number | null>(5);
+  const [hasSearched, setHasSearched] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
 
@@ -157,11 +157,16 @@ export const StaleItemsReport: React.FC = () => {
     setEbayData(ebayMap);
   }, []);
 
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (minTotalSold?: number) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await getItemStats({ staleOnly: false });
+      setHasSearched(true);
+      const data = await getItemStats({
+        staleOnly: false,
+        minTotalSold: minTotalSold ?? undefined,
+        excludeReviewed: true,
+      });
       setItems(data);
       setFilteredItems(data);
 
@@ -177,10 +182,6 @@ export const StaleItemsReport: React.FC = () => {
   }, [fetchSubcollectionData]);
 
   useEffect(() => {
-    fetchItems();
-  }, [fetchItems]);
-
-  useEffect(() => {
     let filtered = items.filter((item) =>
       item.itemName.toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -189,13 +190,6 @@ export const StaleItemsReport: React.FC = () => {
       filtered = filtered.filter(
         (item) => item.daysSinceLastSale <= thresholdFilter
       );
-    }
-
-    // Filter by total sold: unchecked = ≤10, checked = >10
-    if (showHighSellers) {
-      filtered = filtered.filter((item) => item.totalSold > 10);
-    } else {
-      filtered = filtered.filter((item) => item.totalSold <= 10);
     }
 
     // Apply sorting
@@ -216,7 +210,7 @@ export const StaleItemsReport: React.FC = () => {
 
     setFilteredItems(filtered);
     setPage(0);
-  }, [searchTerm, thresholdFilter, items, showHighSellers, sortBy]);
+  }, [searchTerm, thresholdFilter, items, sortBy]);
 
   const handleThresholdChange = (event: SelectChangeEvent<StaleThreshold | 'all'>) => {
     setThresholdFilter(event.target.value as StaleThreshold | 'all');
@@ -321,6 +315,7 @@ export const StaleItemsReport: React.FC = () => {
             minPrice: response.metrics!.minPrice,
             maxPrice: response.metrics!.maxPrice,
             totalListings: response.metrics!.totalListings,
+            totalPages: response.metrics!.totalPages,
             checkedAt: new Date(),
           });
           return newMap;
@@ -528,19 +523,34 @@ export const StaleItemsReport: React.FC = () => {
             <MenuItem value="reviewedAt">Never Reviewed First</MenuItem>
           </Select>
         </FormControl>
-        <FormControlLabel
-          control={
-            <Checkbox
-              checked={showHighSellers}
-              onChange={(e) => setShowHighSellers(e.target.checked)}
-              size="small"
-            />
-          }
-          label="Show >10 sold"
-        />
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <InputLabel>Min Sold</InputLabel>
+          <Select
+            value={minSoldFilter ?? ''}
+            label="Min Sold"
+            onChange={(e) => setMinSoldFilter(e.target.value === '' ? null : Number(e.target.value))}
+          >
+            <MenuItem value="">No filter</MenuItem>
+            <MenuItem value={5}>&gt;5 sold</MenuItem>
+            <MenuItem value={10}>&gt;10 sold</MenuItem>
+            <MenuItem value={20}>&gt;20 sold</MenuItem>
+          </Select>
+        </FormControl>
+        <Button
+          variant="contained"
+          onClick={() => fetchItems(minSoldFilter ?? undefined)}
+          disabled={loading}
+          sx={{ ml: 2 }}
+        >
+          {loading ? 'Loading...' : 'Search'}
+        </Button>
       </Box>
 
-      {filteredItems.length === 0 ? (
+      {!hasSearched ? (
+        <Alert severity="info">
+          Select your filters and click Search to load items.
+        </Alert>
+      ) : filteredItems.length === 0 ? (
         <Alert severity="info">
           {searchTerm || thresholdFilter !== 'all'
             ? 'No items found matching your filters.'
@@ -683,7 +693,7 @@ export const StaleItemsReport: React.FC = () => {
                           timeout="auto"
                           unmountOnExit
                         >
-                          <ItemSalesDetail item={item} />
+                          <ItemSalesDetail item={item} latestPricingFromParent={pricingData.get(item.id)} />
                         </Collapse>
                       </TableCell>
                     </TableRow>

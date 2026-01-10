@@ -35,9 +35,10 @@ import { getSalesForItem, formatCurrency, backfillSalesForItem, getPriceHistory,
 
 interface ItemSalesDetailProps {
   item: ItemStats;
+  latestPricingFromParent?: PriceHistoryEntry;
 }
 
-const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
+const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, latestPricingFromParent }) => {
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [priceHistory, setPriceHistory] = useState<PriceHistoryEntry[]>([]);
   const [ebayMetrics, setEbayMetrics] = useState<EbayMetricsEntry[]>([]);
@@ -104,12 +105,15 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
   const avgProfit = sales.length > 0 ? totalProfit / sales.length : 0;
   const avgMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
+  // Get latest price history entry for Market Pages display
+  // Prefer parent-provided data (updated immediately after price check) over fetched data
+  const latestPricing = latestPricingFromParent || (priceHistory.length > 0 ? priceHistory[0] : null);
+
   // Prepare chart data with timestamp for linear time scale
   // Filter out sales where purchase cost is $0 (unknown cost data)
-  // Also filter out sales where shipCost is $0 to avoid skewing cost data
   const sortedSales = [...sales].sort((a, b) => new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime());
   const salesWithCost = sortedSales.filter(sale =>
-    (sale.purchaseCost || 0) > 0 && (sale.shipCost || 0) > 0
+    (sale.purchaseCost || 0) > 0
   );
 
   // Sales data points (salePrice, buyPlusShip)
@@ -243,8 +247,8 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item }) => {
         <Grid item xs={2.4}>
           <SummaryCard
             title="Market Pages"
-            value={item.pricingData?.totalPages?.toString() || '-'}
-            subtitle={item.pricingData ? `${item.pricingData.totalListings} listings` : 'No data'}
+            value={latestPricing?.totalPages?.toString() || '-'}
+            subtitle={latestPricing ? `${latestPricing.totalListings} listings` : 'No data'}
           />
         </Grid>
       </Grid>

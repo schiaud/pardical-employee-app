@@ -12,6 +12,7 @@ export {
   migrateAllOrdersToItemStats,
   weeklyPriceCheck,
   backfillSalesForItem,
+  autoUnreviewStaleItems,
 } from "./itemStats";
 
 // Car-Part.com scraper functions

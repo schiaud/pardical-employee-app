@@ -12,6 +12,7 @@ import {
   Timestamp,
   onSnapshot,
   Unsubscribe,
+  deleteField,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from './firebase';
@@ -79,14 +80,25 @@ export const getItemStats = async (options?: {
   staleOnly?: boolean;
   threshold?: StaleThreshold;
   limitCount?: number;
+  minTotalSold?: number;
+  excludeReviewed?: boolean;
 }): Promise<ItemStats[]> => {
-  const { staleOnly = false, threshold, limitCount } = options || {};
+  const { staleOnly = false, threshold, limitCount, minTotalSold, excludeReviewed = false } = options || {};
 
   try {
     let q = query(
       collection(db, ITEM_STATS_COLLECTION),
       orderBy('daysSinceLastSale', 'desc')
     );
+
+    // Server-side filter for minTotalSold
+    if (minTotalSold !== undefined) {
+      q = query(
+        collection(db, ITEM_STATS_COLLECTION),
+        where('totalSold', '>', minTotalSold),
+        orderBy('daysSinceLastSale', 'desc')
+      );
+    }
 
     if (staleOnly) {
       q = query(
@@ -110,6 +122,11 @@ export const getItemStats = async (options?: {
 
         // Apply threshold filter client-side if needed
         if (threshold && item.daysSinceLastSale < threshold) {
+          return;
+        }
+
+        // Exclude reviewed items if requested
+        if (excludeReviewed && item.reviewedAt) {
           return;
         }
 
@@ -205,6 +222,15 @@ export const markItemReviewed = async (itemId: string): Promise<void> => {
   const docRef = doc(db, ITEM_STATS_COLLECTION, itemId);
   await updateDoc(docRef, {
     reviewedAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  });
+};
+
+// Unmark item as reviewed (clear reviewedAt field)
+export const unmarkItemReviewed = async (itemId: string): Promise<void> => {
+  const docRef = doc(db, ITEM_STATS_COLLECTION, itemId);
+  await updateDoc(docRef, {
+    reviewedAt: deleteField(),
     updatedAt: Timestamp.now(),
   });
 };
