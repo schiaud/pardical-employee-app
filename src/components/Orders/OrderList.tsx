@@ -7,8 +7,13 @@ import {
   Alert,
   Button,
   Badge,
+  TextField,
+  InputAdornment,
+  IconButton,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 import {
   collection,
   query,
@@ -33,6 +38,8 @@ export const OrderList: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>('notShipped');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [counts, setCounts] = useState<Record<FilterType, number>>({
     new: 0,
     notShipped: 0,
@@ -218,6 +225,14 @@ export const OrderList: React.FC = () => {
     setCounts(newCounts);
   }, [orders, user]);
 
+  // Debounce search term - only update filtered results after user stops typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   const filterButtons = [
     { key: 'new' as FilterType, label: 'New Orders' },
     { key: 'notShipped' as FilterType, label: 'Not Shipped' },
@@ -227,6 +242,37 @@ export const OrderList: React.FC = () => {
     { key: 'all6Months' as FilterType, label: 'All (6 Months)' },
     { key: 'all' as FilterType, label: 'All Orders' },
   ];
+
+  // Filter orders by search term across all visible fields
+  const filterBySearch = (order: Order, term: string): boolean => {
+    if (!term.trim()) return true;
+    const lowerTerm = term.toLowerCase();
+    const searchableFields = [
+      order.orderNumber,
+      order.item,
+      order.buyerUsername,
+      order.shipName,
+      order.shipAddress,
+      order.shipAddress2,
+      order.shipCity,
+      order.shipState,
+      order.shipZip,
+      order.tracking,
+      order.carrier,
+      order.supplier,
+      order.supplierContact,
+      order.employee,
+      order.notes,
+      order.buyPrice,
+      order.shipPrice,
+      order.earnings,
+    ];
+    return searchableFields.some(field =>
+      field && String(field).toLowerCase().includes(lowerTerm)
+    );
+  };
+
+  const filteredOrders = orders.filter(order => filterBySearch(order, debouncedSearchTerm));
 
   if (loading) {
     return (
@@ -315,12 +361,54 @@ export const OrderList: React.FC = () => {
           ))}
         </Box>
 
+        <TextField
+          placeholder="Search orders..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          size="small"
+          sx={{
+            mb: 1.5,
+            maxWidth: 400,
+            '& .MuiOutlinedInput-root': {
+              backgroundColor: '#18181b',
+              '& fieldset': { borderColor: '#27272a' },
+              '&:hover fieldset': { borderColor: '#3f3f46' },
+              '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+            },
+            '& .MuiInputBase-input': {
+              color: '#fff',
+              fontSize: '14px',
+              '&::placeholder': { color: '#71717a', opacity: 1 },
+            },
+          }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon sx={{ color: '#71717a', fontSize: 20 }} />
+              </InputAdornment>
+            ),
+            endAdornment: searchTerm && (
+              <InputAdornment position="end">
+                <IconButton
+                  size="small"
+                  onClick={() => setSearchTerm('')}
+                  sx={{ color: '#71717a', '&:hover': { color: '#a1a1aa' } }}
+                >
+                  <ClearIcon sx={{ fontSize: 18 }} />
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+        />
+
         <Typography sx={{ color: '#71717a', fontSize: '13px' }}>
-          Showing {orders.length} orders
+          {searchTerm
+            ? `${filteredOrders.length} of ${orders.length} orders match "${searchTerm}"`
+            : `Showing ${orders.length} orders`}
         </Typography>
       </Box>
 
-      {orders.length === 0 ? (
+      {filteredOrders.length === 0 ? (
         <Alert
           severity="info"
           sx={{
@@ -329,10 +417,12 @@ export const OrderList: React.FC = () => {
             border: '1px solid #27272a',
           }}
         >
-          No orders found for the selected filter.
+          {searchTerm
+            ? `No orders match "${searchTerm}"`
+            : 'No orders found for the selected filter.'}
         </Alert>
       ) : (
-        orders.map((order) => <OrderCard key={order.id} order={order} />)
+        filteredOrders.map((order) => <OrderCard key={order.id} order={order} />)
       )}
 
       <CreateOrderDialog
