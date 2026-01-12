@@ -91,3 +91,6 @@ export interface Customer {
 
 // Re-export stale items types
 export * from './staleItems';
+
+// Re-export item profile types
+export * from './itemProfile';

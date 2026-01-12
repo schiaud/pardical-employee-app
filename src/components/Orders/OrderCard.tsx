@@ -21,6 +21,8 @@ import { db } from '../../services/firebase';
 import { useAuth } from '../Auth/AuthContext';
 import { CreateOrderDialog } from './CreateOrderDialog';
 import { ReplacementDialog } from './ReplacementDialog';
+import { ItemProfileDialog } from './ItemProfileDialog';
+import { ClickableItemTitle } from './ClickableItemTitle';
 import { Order, OrderStatus } from '../../types';
 
 interface OrderCardProps {
@@ -89,6 +91,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
   const [isClaiming, setIsClaiming] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [replacementDialogOpen, setReplacementDialogOpen] = useState(false);
+  const [itemProfileOpen, setItemProfileOpen] = useState(false);
 
   // Editable fields state
   const [tracking, setTracking] = useState(order.tracking || '');
@@ -288,18 +291,10 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
           >
             #{order.orderNumber}
           </Typography>
-          <Typography
-            sx={{
-              color: '#fff',
-              fontSize: '14px',
-              fontWeight: 600,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {order.item}
-          </Typography>
+          <ClickableItemTitle
+            itemName={order.item}
+            onOpenProfile={() => setItemProfileOpen(true)}
+          />
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           {unassigned ? (
@@ -634,6 +629,13 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
         open={replacementDialogOpen}
         onClose={() => setReplacementDialogOpen(false)}
         onConfirm={handleReplacementConfirm}
+      />
+
+      <ItemProfileDialog
+        open={itemProfileOpen}
+        onClose={() => setItemProfileOpen(false)}
+        itemName={order.item}
+        itemId={order.itemId}
       />
     </Card>
   );
