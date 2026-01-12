@@ -42,6 +42,7 @@ export const ItemProfileDialog: React.FC<ItemProfileDialogProps> = ({
   // Form fields
   const [notes, setNotes] = useState('');
   const [ebayListingUrl, setEbayListingUrl] = useState('');
+  const [ebayItemId, setEbayItemId] = useState<string | undefined>();
   const [qualityNotes, setQualityNotes] = useState('');
   const [vehicleFitment, setVehicleFitment] = useState('');
 
@@ -63,6 +64,7 @@ export const ItemProfileDialog: React.FC<ItemProfileDialogProps> = ({
       setProfile(profileData);
       setNotes(profileData.notes || '');
       setEbayListingUrl(profileData.ebayListingUrl || '');
+      setEbayItemId(profileData.ebayItemId);
       setQualityNotes(profileData.qualityNotes || '');
       setVehicleFitment(profileData.vehicleFitment || '');
     } catch (error) {
@@ -229,19 +231,28 @@ export const ItemProfileDialog: React.FC<ItemProfileDialogProps> = ({
                   size="small"
                   sx={inputSx}
                 />
-                {isValidUrl(ebayListingUrl) && (
-                  <IconButton
-                    component={Link}
-                    href={ebayListingUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    size="small"
-                    sx={{ color: '#3b82f6' }}
-                  >
-                    <OpenInNewIcon fontSize="small" />
-                  </IconButton>
-                )}
+                {(() => {
+                  // Use custom URL if set, otherwise use default from ebayItemId
+                  const displayUrl = ebayListingUrl || (ebayItemId ? `https://www.ebay.com/itm/${ebayItemId}` : '');
+                  return isValidUrl(displayUrl) ? (
+                    <IconButton
+                      component={Link}
+                      href={displayUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      size="small"
+                      sx={{ color: '#3b82f6' }}
+                    >
+                      <OpenInNewIcon fontSize="small" />
+                    </IconButton>
+                  ) : null;
+                })()}
               </Box>
+              {!ebayListingUrl && ebayItemId && (
+                <Typography sx={{ fontSize: '11px', color: '#71717a', mt: 0.5 }}>
+                  Auto: ebay.com/itm/{ebayItemId}
+                </Typography>
+              )}
             </Box>
 
             {/* Quality Notes */}

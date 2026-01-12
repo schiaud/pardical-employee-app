@@ -9,6 +9,7 @@ import { db } from './firebase';
 import { ItemProfile, ItemProfileFirestore } from '../types/itemProfile';
 
 const ITEM_PROFILES_COLLECTION = 'itemProfiles';
+const ITEM_STATS_COLLECTION = 'itemStats';
 
 // Normalize item name to create a consistent document ID
 export const normalizeItemName = (itemName: string): string => {
@@ -26,6 +27,18 @@ const convertToItemProfile = (data: ItemProfileFirestore): ItemProfile => ({
   createdAt: data.createdAt?.toDate?.() || new Date(),
   updatedAt: data.updatedAt?.toDate?.() || new Date(),
 });
+
+// Fetch ebayItemId from itemStats collection (if available)
+const fetchEbayItemIdFromStats = async (itemName: string): Promise<string | undefined> => {
+  const statsId = normalizeItemName(itemName);
+  const statsRef = doc(db, ITEM_STATS_COLLECTION, statsId);
+  const statsSnap = await getDoc(statsRef);
+  if (statsSnap.exists()) {
+    const data = statsSnap.data();
+    return data?.ebayItemId as string | undefined;
+  }
+  return undefined;
+};
 
 // Get item profile by item name (returns null if not exists)
 export const getItemProfile = async (itemName: string): Promise<ItemProfile | null> => {
@@ -50,29 +63,38 @@ export const getOrCreateItemProfile = async (
   const docRef = doc(db, ITEM_PROFILES_COLLECTION, profileId);
   const docSnap = await getDoc(docRef);
 
+  let profile: ItemProfile;
+
   if (docSnap.exists()) {
-    return convertToItemProfile(docSnap.data() as ItemProfileFirestore);
+    profile = convertToItemProfile(docSnap.data() as ItemProfileFirestore);
+  } else {
+    // Create new profile with empty fields
+    const now = Timestamp.now();
+    const newProfile: ItemProfileFirestore = {
+      id: profileId,
+      itemName: itemName,
+      itemId: itemId || '',
+      notes: '',
+      ebayListingUrl: '',
+      qualityNotes: '',
+      vehicleFitment: '',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: userEmail || '',
+      updatedBy: userEmail || '',
+    };
+
+    await setDoc(docRef, newProfile);
+    profile = convertToItemProfile(newProfile);
   }
 
-  // Create new profile with empty fields
-  const now = Timestamp.now();
-  const newProfile: ItemProfileFirestore = {
-    id: profileId,
-    itemName: itemName,
-    itemId: itemId || '',
-    notes: '',
-    ebayListingUrl: '',
-    qualityNotes: '',
-    vehicleFitment: '',
-    createdAt: now,
-    updatedAt: now,
-    createdBy: userEmail || '',
-    updatedBy: userEmail || '',
-  };
+  // Fetch ebayItemId from itemStats (if available)
+  const ebayItemId = await fetchEbayItemIdFromStats(itemName);
+  if (ebayItemId) {
+    profile.ebayItemId = ebayItemId;
+  }
 
-  await setDoc(docRef, newProfile);
-
-  return convertToItemProfile(newProfile);
+  return profile;
 };
 
 // Update item profile

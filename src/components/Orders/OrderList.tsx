@@ -402,9 +402,16 @@ export const OrderList: React.FC = () => {
         />
 
         <Typography sx={{ color: '#71717a', fontSize: '13px' }}>
-          {searchTerm
-            ? `${filteredOrders.length} of ${orders.length} orders match "${searchTerm}"`
-            : `Showing ${orders.length} orders`}
+          {(() => {
+            const total = filteredOrders.reduce((sum, order) => {
+              const val = parseFloat(String(order.earnings || '0').replace(/[^0-9.-]/g, ''));
+              return sum + (isNaN(val) ? 0 : val);
+            }, 0);
+            const totalStr = `$${total.toFixed(2)}`;
+            return searchTerm
+              ? `${filteredOrders.length} of ${orders.length} orders match "${searchTerm}": Total ${totalStr}`
+              : `Showing ${filteredOrders.length} orders: Total ${totalStr}`;
+          })()}
         </Typography>
       </Box>
 

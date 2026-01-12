@@ -4,6 +4,7 @@ export interface ItemProfile {
   id: string;              // normalized item name (document ID)
   itemName: string;        // original display name
   itemId?: string;         // SKU if known
+  ebayItemId?: string;     // eBay item ID (from itemStats)
   notes: string;           // general notes
   ebayListingUrl: string;  // eBay listing link
   qualityNotes: string;    // known issues, inspection points
@@ -18,6 +19,7 @@ export interface ItemProfileFirestore {
   id: string;
   itemName: string;
   itemId?: string;
+  ebayItemId?: string;
   notes: string;
   ebayListingUrl: string;
   qualityNotes: string;
