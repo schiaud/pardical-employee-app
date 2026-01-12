@@ -63,7 +63,13 @@ export const ItemProfileDialog: React.FC<ItemProfileDialogProps> = ({
       );
       setProfile(profileData);
       setNotes(profileData.notes || '');
-      setEbayListingUrl(profileData.ebayListingUrl || '');
+      // Pre-fill with default eBay URL if no custom URL is saved
+      // Use ebayItemId from itemStats, or fall back to itemId prop (which may be the eBay item ID)
+      const ebayId = profileData.ebayItemId || itemId;
+      setEbayListingUrl(
+        profileData.ebayListingUrl ||
+        (ebayId ? `https://www.ebay.com/itm/${ebayId}` : '')
+      );
       setEbayItemId(profileData.ebayItemId);
       setQualityNotes(profileData.qualityNotes || '');
       setVehicleFitment(profileData.vehicleFitment || '');
@@ -248,11 +254,6 @@ export const ItemProfileDialog: React.FC<ItemProfileDialogProps> = ({
                   ) : null;
                 })()}
               </Box>
-              {!ebayListingUrl && ebayItemId && (
-                <Typography sx={{ fontSize: '11px', color: '#71717a', mt: 0.5 }}>
-                  Auto: ebay.com/itm/{ebayItemId}
-                </Typography>
-              )}
             </Box>
 
             {/* Quality Notes */}

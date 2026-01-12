@@ -31,6 +31,8 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import SyncIcon from '@mui/icons-material/Sync';
 import { ItemStats, SaleRecord, PriceHistoryEntry, EbayMetricsEntry } from '../../types/staleItems';
+import { ItemProfileDialog } from '../Orders/ItemProfileDialog';
+import { ClickableItemTitle } from '../Orders/ClickableItemTitle';
 import { getSalesForItem, formatCurrency, backfillSalesForItem, getPriceHistory, getEbayMetricsHistory } from '../../services/staleItems';
 
 interface ItemSalesDetailProps {
@@ -44,6 +46,7 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, latestPricingFr
   const [ebayMetrics, setEbayMetrics] = useState<EbayMetricsEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [backfilling, setBackfilling] = useState(false);
+  const [itemProfileOpen, setItemProfileOpen] = useState(false);
   const backfillAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -411,13 +414,27 @@ const ItemSalesDetail: React.FC<ItemSalesDetailProps> = ({ item, latestPricingFr
       {/* Header */}
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <Typography variant="body2" color="text.secondary">Timeline View</Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-          Full Item: {item.itemName}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>
+          <Typography variant="caption" color="text.secondary">
+            Full Item:
+          </Typography>
+          <ClickableItemTitle
+            itemName={item.itemName}
+            onOpenProfile={() => setItemProfileOpen(true)}
+          />
+        </Box>
       </Box>
 
       {/* Timeline View */}
       <PrototypeA />
+
+      {/* Item Profile Dialog */}
+      <ItemProfileDialog
+        open={itemProfileOpen}
+        onClose={() => setItemProfileOpen(false)}
+        itemName={item.itemName}
+        itemId={item.itemId || item.id}
+      />
     </Box>
   );
 };
