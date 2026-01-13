@@ -45,6 +45,12 @@ const getStatusColor = (status: string, dueDate?: string): string => {
   if (status === 'return' || status === 'return done' || status === 'return complete') {
     return '#a855f7'; // purple
   }
+  if (status === 'return delivered') {
+    return '#f97316'; // orange - shipped back to supplier
+  }
+  if (status === 'refunded') {
+    return '#22c55e'; // green - money back
+  }
   return '#71717a'; // grey
 };
 
@@ -59,6 +65,8 @@ const getStatusLabel = (status: string): string => {
     'return': 'RETURN',
     'return done': 'RETURN DONE',
     'return complete': 'RETURN COMPLETE',
+    'return delivered': 'RETURN DELIVERED',
+    'refunded': 'REFUNDED',
   };
   return labels[status] || status.toUpperCase();
 };
@@ -613,6 +621,8 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
             <MenuItem value="delivered">DELIVERED</MenuItem>
             <MenuItem value="completed">COMPLETED</MenuItem>
             <MenuItem value="return">RETURN</MenuItem>
+            <MenuItem value="return delivered">RETURN DELIVERED</MenuItem>
+            <MenuItem value="refunded">REFUNDED</MenuItem>
             <MenuItem value="return done">RETURN DONE</MenuItem>
             <MenuItem value="return complete">RETURN COMPLETE</MenuItem>
           </Select>

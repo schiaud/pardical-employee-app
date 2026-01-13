@@ -27,6 +27,7 @@ import {
 import { db } from '../../services/firebase';
 import { Order } from '../../types';
 import { OrderCard } from './OrderCard';
+import { ReturnTicketCard } from './ReturnTicketCard';
 import { CreateOrderDialog } from './CreateOrderDialog';
 import { useAuth } from '../Auth/AuthContext';
 
@@ -429,7 +430,13 @@ export const OrderList: React.FC = () => {
             : 'No orders found for the selected filter.'}
         </Alert>
       ) : (
-        filteredOrders.map((order) => <OrderCard key={order.id} order={order} />)
+        filteredOrders.map((order) =>
+          order._collection === 'returns' ? (
+            <ReturnTicketCard key={order.id} order={order} />
+          ) : (
+            <OrderCard key={order.id} order={order} />
+          )
+        )
       )}
 
       <CreateOrderDialog

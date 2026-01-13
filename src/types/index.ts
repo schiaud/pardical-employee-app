@@ -1,13 +1,15 @@
-export type OrderStatus = 
-  | 'not shipped' 
+export type OrderStatus =
+  | 'not shipped'
   | 'notShipped'
-  | 'processing' 
-  | 'shipped' 
-  | 'delivered' 
+  | 'processing'
+  | 'shipped'
+  | 'delivered'
   | 'completed'
-  | 'return' 
+  | 'return'
   | 'return done'
-  | 'return complete';
+  | 'return complete'
+  | 'return delivered'
+  | 'refunded';
 
 export interface Order {
   id: string;
@@ -55,6 +57,11 @@ export interface Order {
   
   // Notes
   notes?: string;
+
+  // Return-specific fields (for returns collection)
+  returnTracking?: string;
+  returnCarrier?: string;
+  credited?: string;
 
   // Internal tracking (not stored in Firestore)
   _collection?: 'orders' | 'returns';
