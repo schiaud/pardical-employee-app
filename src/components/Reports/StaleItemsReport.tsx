@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   Container,
   Typography,
@@ -83,6 +83,12 @@ export const StaleItemsReport: React.FC = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
 
+  // Refs to track previous filter values (to avoid resetting page on in-place item updates)
+  const prevSearchTermRef = useRef(searchTerm);
+  const prevThresholdFilterRef = useRef(thresholdFilter);
+  const prevSortByRef = useRef(sortBy);
+  const shouldResetPageRef = useRef(false);
+
   // Price check dialog state
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [priceCheckItem, setPriceCheckItem] = useState<ItemStats | null>(null);
@@ -162,6 +168,7 @@ export const StaleItemsReport: React.FC = () => {
       setLoading(true);
       setError(null);
       setHasSearched(true);
+      shouldResetPageRef.current = true; // Reset page on fresh fetch
       const data = await getItemStats({
         staleOnly: false,
         minTotalSold: minTotalSold ?? undefined,
@@ -209,7 +216,21 @@ export const StaleItemsReport: React.FC = () => {
     }
 
     setFilteredItems(filtered);
-    setPage(0);
+
+    // Only reset page if filters changed OR it's a fresh fetch
+    const filtersChanged =
+      prevSearchTermRef.current !== searchTerm ||
+      prevThresholdFilterRef.current !== thresholdFilter ||
+      prevSortByRef.current !== sortBy;
+
+    if (filtersChanged || shouldResetPageRef.current) {
+      setPage(0);
+      shouldResetPageRef.current = false;
+    }
+
+    prevSearchTermRef.current = searchTerm;
+    prevThresholdFilterRef.current = thresholdFilter;
+    prevSortByRef.current = sortBy;
   }, [searchTerm, thresholdFilter, items, sortBy]);
 
   const handleThresholdChange = (event: SelectChangeEvent<StaleThreshold | 'all'>) => {
