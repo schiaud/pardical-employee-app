@@ -14,23 +14,22 @@ interface TrackingProgressBarProps {
 }
 
 const STEPS = [
-  { key: 'processed', label: 'Processed' },
-  { key: 'shipped', label: 'Shipped' },
-  { key: 'enroute', label: 'En Route' },
-  { key: 'arrived', label: 'Arrived' },
+  { key: 'pre_transit', label: 'Pre Transit' },
+  { key: 'in_transit', label: 'In Transit' },
+  { key: 'delivered', label: 'Delivered' },
 ];
 
-// Map Shippo status to step index (0-3)
+// Map Shippo status to step index (0-2)
 function getStepFromStatus(status?: TrackingStatus): number {
   switch (status) {
     case 'PRE_TRANSIT':
-      return 0; // Processed
+      return 0; // Pre Transit
     case 'TRANSIT':
-      return 2; // En Route
+      return 1; // In Transit
     case 'DELIVERED':
-      return 3; // Arrived
+      return 2; // Delivered
     case 'RETURNED':
-      return 1; // Shipped (being returned)
+      return 1; // Treat as In Transit
     case 'FAILURE':
     case 'UNKNOWN':
     default:
@@ -119,8 +118,8 @@ export const TrackingProgressBar: React.FC<TrackingProgressBarProps> = ({
         {isDelivered ? '✓ Delivered' : STEPS[Math.max(0, currentStep)]?.label || 'Pending'}
       </Typography>
 
-      {/* Golden ETA badge - styled like screenshot */}
-      {etaFormatted && !isDelivered && (
+      {/* Golden ETA badge - only show when carrier has the package (not PRE_TRANSIT) */}
+      {etaFormatted && !isDelivered && status !== 'PRE_TRANSIT' && (
         <Box
           sx={{
             px: 1,
