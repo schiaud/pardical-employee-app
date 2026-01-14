@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   Box,
@@ -17,6 +17,8 @@ import { db } from '../../services/firebase';
 import { ItemProfileDialog } from './ItemProfileDialog';
 import { ClickableItemTitle } from './ClickableItemTitle';
 import { Order, OrderStatus } from '../../types';
+import { TrackingProgressBar } from './TrackingProgressBar';
+import { getTrackingStatus, shouldFetchTracking, type TrackingStatus } from '../../services/shippo';
 
 interface ReturnTicketCardProps {
   order: Order;
@@ -58,6 +60,11 @@ export const ReturnTicketCard: React.FC<ReturnTicketCardProps> = ({ order }) => 
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [itemProfileOpen, setItemProfileOpen] = useState(false);
+  const [isTrackingLoading, setIsTrackingLoading] = useState(false);
+  const [returnTrackingStatus, setReturnTrackingStatus] = useState<TrackingStatus | undefined>(order.returnTrackingStatus);
+  const [returnTrackingStatusDetails, setReturnTrackingStatusDetails] = useState(order.returnTrackingStatusDetails);
+  const [returnTrackingEta, setReturnTrackingEta] = useState(order.returnTrackingEta);
+  const [returnTrackingLastChecked, setReturnTrackingLastChecked] = useState(order.returnTrackingLastChecked);
 
   // Editable fields state
   const [returnTracking, setReturnTracking] = useState(order.returnTracking || '');
@@ -65,6 +72,48 @@ export const ReturnTicketCard: React.FC<ReturnTicketCardProps> = ({ order }) => 
   const [credited, setCredited] = useState(order.credited || '');
   const [status, setStatus] = useState<OrderStatus>(order.status);
   const [notes, setNotes] = useState(order.notes || '');
+
+  // Fetch return tracking status from Shippo and cache in Firestore
+  const fetchReturnTrackingStatus = async (force = false) => {
+    // Check if we should fetch (has tracking, not delivered, stale cache)
+    if (!force && !shouldFetchTracking(order.returnTracking, returnTrackingStatus, returnTrackingLastChecked)) {
+      return;
+    }
+    if (!order.returnTracking || !order.returnCarrier) return;
+
+    setIsTrackingLoading(true);
+    try {
+      const result = await getTrackingStatus(order.returnCarrier, order.returnTracking);
+      const now = new Date().toISOString();
+
+      // Update local state
+      setReturnTrackingStatus(result.status);
+      setReturnTrackingStatusDetails(result.statusDetails);
+      setReturnTrackingEta(result.eta || undefined);
+      setReturnTrackingLastChecked(now);
+
+      // Save to Firestore
+      const orderRef = doc(db, 'returns', order.id);
+      await updateDoc(orderRef, {
+        returnTrackingStatus: result.status,
+        returnTrackingStatusDetails: result.statusDetails,
+        returnTrackingEta: result.eta || null,
+        returnTrackingLastChecked: now,
+      });
+    } catch (error) {
+      // Silently fail - tracking fetch errors are expected for invalid/test data
+      // console.error('Error fetching return tracking:', error);
+    } finally {
+      setIsTrackingLoading(false);
+    }
+  };
+
+  // Auto-fetch return tracking on mount if stale
+  useEffect(() => {
+    if (order.returnTracking && order.returnCarrier) {
+      fetchReturnTrackingStatus();
+    }
+  }, [order.id]);
 
   const statusColor = getReturnStatusColor(order.status);
   const employeeDisplay = order.employee?.replace('@pardical.com', '') || 'n/a';
@@ -167,6 +216,18 @@ export const ReturnTicketCard: React.FC<ReturnTicketCardProps> = ({ order }) => 
           </Typography>
         </Box>
       </Box>
+
+      {/* Return Tracking Progress Bar - only shown when return tracking exists */}
+      {order.returnTracking && (
+        <TrackingProgressBar
+          status={returnTrackingStatus}
+          statusDetails={returnTrackingStatusDetails}
+          eta={returnTrackingEta}
+          isLoading={isTrackingLoading}
+          onRefresh={() => fetchReturnTrackingStatus(true)}
+          lastChecked={returnTrackingLastChecked}
+        />
+      )}
 
       {/* Body - Two Sections */}
       <Box sx={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', borderBottom: '1px solid #27272a' }}>

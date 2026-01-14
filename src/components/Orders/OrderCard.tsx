@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   Box,
@@ -24,6 +24,8 @@ import { ReplacementDialog } from './ReplacementDialog';
 import { ItemProfileDialog } from './ItemProfileDialog';
 import { ClickableItemTitle } from './ClickableItemTitle';
 import { Order, OrderStatus } from '../../types';
+import { TrackingProgressBar } from './TrackingProgressBar';
+import { getTrackingStatus, shouldFetchTracking, type TrackingStatus } from '../../services/shippo';
 
 interface OrderCardProps {
   order: Order;
@@ -100,6 +102,11 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [replacementDialogOpen, setReplacementDialogOpen] = useState(false);
   const [itemProfileOpen, setItemProfileOpen] = useState(false);
+  const [isTrackingLoading, setIsTrackingLoading] = useState(false);
+  const [trackingStatus, setTrackingStatus] = useState<TrackingStatus | undefined>(order.trackingStatus);
+  const [trackingStatusDetails, setTrackingStatusDetails] = useState(order.trackingStatusDetails);
+  const [trackingEta, setTrackingEta] = useState(order.trackingEta);
+  const [trackingLastChecked, setTrackingLastChecked] = useState(order.trackingLastChecked);
 
   // Editable fields state
   const [tracking, setTracking] = useState(order.tracking || '');
@@ -111,6 +118,49 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
   const [shipPrice, setShipPrice] = useState(order.shipPrice || '');
   const [status, setStatus] = useState<OrderStatus>(order.status);
   const [notes, setNotes] = useState(order.notes || '');
+
+  // Fetch tracking status from Shippo and cache in Firestore
+  const fetchTrackingStatus = async (force = false) => {
+    // Check if we should fetch (has tracking, not delivered, stale cache)
+    if (!force && !shouldFetchTracking(order.tracking, trackingStatus, trackingLastChecked)) {
+      return;
+    }
+    if (!order.tracking || !order.carrier) return;
+
+    setIsTrackingLoading(true);
+    try {
+      const result = await getTrackingStatus(order.carrier, order.tracking);
+      const now = new Date().toISOString();
+
+      // Update local state
+      setTrackingStatus(result.status);
+      setTrackingStatusDetails(result.statusDetails);
+      setTrackingEta(result.eta || undefined);
+      setTrackingLastChecked(now);
+
+      // Save to Firestore
+      const collectionName = order._collection || 'orders';
+      const orderRef = doc(db, collectionName, order.id);
+      await updateDoc(orderRef, {
+        trackingStatus: result.status,
+        trackingStatusDetails: result.statusDetails,
+        trackingEta: result.eta || null,
+        trackingLastChecked: now,
+      });
+    } catch (error) {
+      // Silently fail - tracking fetch errors are expected for invalid/test data
+      // console.error('Error fetching tracking:', error);
+    } finally {
+      setIsTrackingLoading(false);
+    }
+  };
+
+  // Auto-fetch tracking on mount if stale
+  useEffect(() => {
+    if (order.tracking && order.carrier) {
+      fetchTrackingStatus();
+    }
+  }, [order.id]); // Only run on mount or when order changes
 
   const statusColor = getStatusColor(order.status, order.dueDate);
   const unassigned = isUnassigned(order.employee);
@@ -358,6 +408,18 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
           )}
         </Box>
       </Box>
+
+      {/* Tracking Progress Bar - only shown when tracking number exists */}
+      {order.tracking && (
+        <TrackingProgressBar
+          status={trackingStatus}
+          statusDetails={trackingStatusDetails}
+          eta={trackingEta}
+          isLoading={isTrackingLoading}
+          onRefresh={() => fetchTrackingStatus(true)}
+          lastChecked={trackingLastChecked}
+        />
+      )}
 
       {/* Body - Two Sections */}
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid #27272a' }}>

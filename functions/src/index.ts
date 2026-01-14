@@ -28,6 +28,9 @@ export {importEbayData} from "./ebayImport";
 // Test data population (temporary)
 export {populateTestSales} from "./populateTestSales";
 
+// Shippo tracking function
+export {getShippoTracking} from "./shippoTracking";
+
 /**
  * eBay Webhook Handler
  * Receives platform notifications from eBay when events occur

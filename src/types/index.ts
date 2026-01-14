@@ -42,6 +42,10 @@ export interface Order {
   // Tracking Information
   tracking?: string;
   carrier?: string;
+  trackingStatus?: 'PRE_TRANSIT' | 'TRANSIT' | 'DELIVERED' | 'RETURNED' | 'FAILURE' | 'UNKNOWN';
+  trackingStatusDetails?: string;
+  trackingEta?: string;
+  trackingLastChecked?: string;
   
   // Supplier Information
   supplier?: string;
@@ -61,6 +65,10 @@ export interface Order {
   // Return-specific fields (for returns collection)
   returnTracking?: string;
   returnCarrier?: string;
+  returnTrackingStatus?: 'PRE_TRANSIT' | 'TRANSIT' | 'DELIVERED' | 'RETURNED' | 'FAILURE' | 'UNKNOWN';
+  returnTrackingStatusDetails?: string;
+  returnTrackingEta?: string;
+  returnTrackingLastChecked?: string;
   credited?: string;
 
   // Internal tracking (not stored in Firestore)
