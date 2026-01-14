@@ -2,7 +2,6 @@ import React from 'react';
 import { Box, Typography, IconButton, CircularProgress, Tooltip } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ErrorIcon from '@mui/icons-material/Error';
 import type { TrackingStatus } from '../../services/shippo';
 
 interface TrackingProgressBarProps {
@@ -27,7 +26,7 @@ function getStepFromStatus(status?: TrackingStatus): number {
     case 'PRE_TRANSIT':
       return 0; // Processed
     case 'TRANSIT':
-      return 2; // En Route (skip shipped, go straight to en route since it's in transit)
+      return 2; // En Route
     case 'DELIVERED':
       return 3; // Arrived
     case 'RETURNED':
@@ -49,31 +48,17 @@ function formatEta(eta?: string | null): string {
   }
 }
 
-function formatLastChecked(lastChecked?: string): string {
-  if (!lastChecked) return '';
-  try {
-    const date = new Date(lastChecked);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return '';
-  }
-}
-
+/**
+ * Style A: Minimalist Dots - Inline version for footer
+ * Shows small dots connected by lines, current status text, and golden ETA badge
+ */
 export const TrackingProgressBar: React.FC<TrackingProgressBarProps> = ({
   status,
-  statusDetails,
   eta,
   isLoading,
   onRefresh,
-  lastChecked,
 }) => {
   const currentStep = getStepFromStatus(status);
-  const isFailure = status === 'FAILURE';
   const isDelivered = status === 'DELIVERED';
   const etaFormatted = formatEta(eta);
 
@@ -82,78 +67,44 @@ export const TrackingProgressBar: React.FC<TrackingProgressBarProps> = ({
       sx={{
         display: 'flex',
         alignItems: 'center',
-        gap: 2,
-        px: 2,
-        py: 1,
-        backgroundColor: '#18181b',
-        borderBottom: '1px solid #27272a',
+        gap: 1.5,
       }}
     >
-      {/* Progress Steps */}
-      <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+      {/* Simple dot progress */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
         {STEPS.map((step, index) => {
           const isCompleted = currentStep >= index;
-          const isCurrent = currentStep === index;
           const isLast = index === STEPS.length - 1;
 
           return (
             <React.Fragment key={step.key}>
-              {/* Step Circle */}
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <Tooltip title={step.label}>
                 <Box
                   sx={{
-                    width: 24,
-                    height: 24,
+                    width: isCompleted ? 10 : 8,
+                    height: isCompleted ? 10 : 8,
                     borderRadius: '50%',
+                    backgroundColor: isCompleted
+                      ? isDelivered && isLast ? '#22c55e' : '#60a5fa'
+                      : '#3f3f46',
+                    transition: 'all 0.3s ease',
+                    boxShadow: isCompleted ? '0 0 6px rgba(96, 165, 250, 0.3)' : 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: isFailure && isCurrent
-                      ? '#ef4444'
-                      : isCompleted
-                        ? isDelivered && isLast
-                          ? '#22c55e'
-                          : '#3b82f6'
-                        : '#3f3f46',
-                    transition: 'all 0.3s',
                   }}
                 >
-                  {isDelivered && isLast ? (
-                    <CheckCircleIcon sx={{ fontSize: 16, color: '#fff' }} />
-                  ) : isFailure && isCurrent ? (
-                    <ErrorIcon sx={{ fontSize: 16, color: '#fff' }} />
-                  ) : (
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        backgroundColor: isCompleted ? '#fff' : '#71717a',
-                      }}
-                    />
+                  {isDelivered && isLast && (
+                    <CheckCircleIcon sx={{ fontSize: 10, color: '#fff' }} />
                   )}
                 </Box>
-                <Typography
-                  sx={{
-                    fontSize: '9px',
-                    color: isCompleted ? '#e4e4e7' : '#52525b',
-                    mt: 0.5,
-                    fontWeight: isCurrent ? 600 : 400,
-                  }}
-                >
-                  {step.label}
-                </Typography>
-              </Box>
-
-              {/* Connector Line */}
+              </Tooltip>
               {!isLast && (
                 <Box
                   sx={{
-                    flex: 1,
-                    height: 2,
-                    backgroundColor: currentStep > index ? '#3b82f6' : '#3f3f46',
-                    mx: 0.5,
-                    mb: 2, // Offset for label
+                    width: 16,
+                    height: 1,
+                    backgroundColor: currentStep > index ? '#60a5fa' : '#27272a',
                     transition: 'all 0.3s',
                   }}
                 />
@@ -163,58 +114,42 @@ export const TrackingProgressBar: React.FC<TrackingProgressBarProps> = ({
         })}
       </Box>
 
-      {/* Status Details / ETA */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 100 }}>
-        {etaFormatted && !isDelivered && (
-          <Typography sx={{ fontSize: '10px', color: '#a1a1aa' }}>
-            ETA: {etaFormatted}
-          </Typography>
-        )}
-        {statusDetails && (
-          <Tooltip title={statusDetails}>
-            <Typography
-              sx={{
-                fontSize: '9px',
-                color: '#71717a',
-                maxWidth: 120,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {statusDetails}
-            </Typography>
-          </Tooltip>
-        )}
-        {lastChecked && (
-          <Typography sx={{ fontSize: '8px', color: '#52525b' }}>
-            Updated: {formatLastChecked(lastChecked)}
-          </Typography>
-        )}
-      </Box>
+      {/* Current status text */}
+      <Typography sx={{ fontSize: '10px', color: '#a1a1aa', fontWeight: 500 }}>
+        {isDelivered ? '✓ Delivered' : STEPS[Math.max(0, currentStep)]?.label || 'Pending'}
+      </Typography>
 
-      {/* Refresh Button */}
-      {onRefresh && (
-        <Tooltip title={isDelivered ? 'Package delivered' : 'Refresh tracking'}>
-          <span>
-            <IconButton
-              size="small"
-              onClick={onRefresh}
-              disabled={isLoading || isDelivered}
-              sx={{
-                color: '#71717a',
-                '&:hover': { color: '#a1a1aa', backgroundColor: 'rgba(113, 113, 122, 0.1)' },
-                '&.Mui-disabled': { color: '#3f3f46' },
-              }}
-            >
-              {isLoading ? (
-                <CircularProgress size={16} sx={{ color: '#71717a' }} />
-              ) : (
-                <RefreshIcon sx={{ fontSize: 18 }} />
-              )}
-            </IconButton>
-          </span>
-        </Tooltip>
+      {/* Golden ETA badge - styled like screenshot */}
+      {etaFormatted && !isDelivered && (
+        <Box
+          sx={{
+            px: 1,
+            py: 0.25,
+            borderRadius: 1,
+            backgroundColor: 'rgba(251, 191, 36, 0.1)',
+            border: '1px solid rgba(251, 191, 36, 0.4)',
+          }}
+        >
+          <Typography sx={{ fontSize: '10px', color: '#fbbf24', fontWeight: 500 }}>
+            ETA {etaFormatted}
+          </Typography>
+        </Box>
+      )}
+
+      {/* Refresh button */}
+      {onRefresh && !isDelivered && (
+        <IconButton
+          size="small"
+          onClick={onRefresh}
+          disabled={isLoading}
+          sx={{ color: '#52525b', p: 0.25, '&:hover': { color: '#71717a' } }}
+        >
+          {isLoading ? (
+            <CircularProgress size={12} sx={{ color: '#52525b' }} />
+          ) : (
+            <RefreshIcon sx={{ fontSize: 14 }} />
+          )}
+        </IconButton>
       )}
     </Box>
   );

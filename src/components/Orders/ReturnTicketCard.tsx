@@ -217,18 +217,6 @@ export const ReturnTicketCard: React.FC<ReturnTicketCardProps> = ({ order }) => 
         </Box>
       </Box>
 
-      {/* Return Tracking Progress Bar - only shown when return tracking exists */}
-      {order.returnTracking && (
-        <TrackingProgressBar
-          status={returnTrackingStatus}
-          statusDetails={returnTrackingStatusDetails}
-          eta={returnTrackingEta}
-          isLoading={isTrackingLoading}
-          onRefresh={() => fetchReturnTrackingStatus(true)}
-          lastChecked={returnTrackingLastChecked}
-        />
-      )}
-
       {/* Body - Two Sections */}
       <Box sx={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', borderBottom: '1px solid #27272a' }}>
         {/* Left: Original Order Info (Read-only) */}
@@ -396,7 +384,20 @@ export const ReturnTicketCard: React.FC<ReturnTicketCardProps> = ({ order }) => 
           </Collapse>
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          {/* Return Tracking Progress - inline in footer */}
+          {order.returnTracking && (
+            <>
+              <TrackingProgressBar
+                status={returnTrackingStatus}
+                eta={returnTrackingEta}
+                isLoading={isTrackingLoading}
+                onRefresh={() => fetchReturnTrackingStatus(true)}
+              />
+              <Box sx={{ width: '1px', height: 24, backgroundColor: '#52525b', mx: 1.5 }} />
+            </>
+          )}
+
           {order.updatedAt && (
             <Typography sx={{ fontSize: '10px', color: '#52525b', mr: 1 }}>
               Updated: {new Date(order.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}

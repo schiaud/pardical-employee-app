@@ -409,18 +409,6 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
         </Box>
       </Box>
 
-      {/* Tracking Progress Bar - only shown when tracking number exists */}
-      {order.tracking && (
-        <TrackingProgressBar
-          status={trackingStatus}
-          statusDetails={trackingStatusDetails}
-          eta={trackingEta}
-          isLoading={isTrackingLoading}
-          onRefresh={() => fetchTrackingStatus(true)}
-          lastChecked={trackingLastChecked}
-        />
-      )}
-
       {/* Body - Two Sections */}
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid #27272a' }}>
         {/* Left: Database Details */}
@@ -618,7 +606,20 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
           </Collapse>
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          {/* Tracking Progress - inline in footer */}
+          {order.tracking && (
+            <>
+              <TrackingProgressBar
+                status={trackingStatus}
+                eta={trackingEta}
+                isLoading={isTrackingLoading}
+                onRefresh={() => fetchTrackingStatus(true)}
+              />
+              <Box sx={{ width: '1px', height: 24, backgroundColor: '#52525b', mx: 1.5 }} />
+            </>
+          )}
+
           {order.updatedAt && (
             <Typography sx={{ fontSize: '10px', color: '#52525b', mr: 1 }}>
               Updated: {new Date(order.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
