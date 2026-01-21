@@ -31,6 +31,9 @@ export {populateTestSales} from "./populateTestSales";
 // Shippo tracking function
 export {getShippoTracking} from "./shippoTracking";
 
+// Shippo shipping functions (rates + label purchase)
+export {getShippingRates, purchaseShippingLabel} from "./shippoShipping";
+
 /**
  * eBay Webhook Handler
  * Receives platform notifications from eBay when events occur

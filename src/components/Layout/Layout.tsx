@@ -11,13 +11,16 @@ import {
   MenuItem,
   IconButton,
 } from '@mui/material';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import { useAuth } from '../Auth/AuthContext';
+import { ShippingDialog } from '../Shipping/ShippingDialog';
 
 export const Layout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [shippingDialogOpen, setShippingDialogOpen] = React.useState(false);
 
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -95,6 +98,27 @@ export const Layout: React.FC = () => {
                 {tab.label}
               </Button>
             ))}
+            <Button
+              onClick={() => setShippingDialogOpen(true)}
+              startIcon={<LocalShippingIcon sx={{ fontSize: 16 }} />}
+              sx={{
+                px: 2,
+                py: 0.75,
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontWeight: 500,
+                ml: 1,
+                color: '#a1a1aa',
+                backgroundColor: 'transparent',
+                border: '1px solid #27272a',
+                '&:hover': {
+                  backgroundColor: '#27272a',
+                  color: '#fff',
+                },
+              }}
+            >
+              Ship
+            </Button>
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -154,6 +178,11 @@ export const Layout: React.FC = () => {
       <Box component="main" sx={{ flexGrow: 1, bgcolor: 'background.default' }}>
         <Outlet />
       </Box>
+
+      <ShippingDialog
+        open={shippingDialogOpen}
+        onClose={() => setShippingDialogOpen(false)}
+      />
     </Box>
   );
 };
