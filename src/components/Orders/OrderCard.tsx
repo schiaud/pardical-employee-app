@@ -225,8 +225,38 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
     setReplacementDialogOpen(false);
 
     if (!wantsReplacement) {
-      // Just save as return normally
-      await performUpdate();
+      // Create return ticket in returns collection (no replacement needed)
+      setIsUpdating(true);
+      try {
+        const returnData = {
+          ...order,
+          tracking,
+          carrier,
+          supplier,
+          supplierContact,
+          supplierPhone,
+          buyPrice,
+          shipPrice,
+          status: 'return' as OrderStatus,
+          notes,
+          returnedAt: new Date().toISOString(),
+          originalOrderId: order.id,
+        };
+        const { id, ...returnDataWithoutId } = returnData;
+        await addDoc(collection(db, 'returns'), returnDataWithoutId);
+
+        // Mark original order as 'return done' so it doesn't show in orders list
+        const orderRef = doc(db, 'orders', order.id);
+        await updateDoc(orderRef, {
+          status: 'return done',
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.error('Error creating return ticket:', error);
+        alert('Failed to create return ticket. Please try again.');
+      } finally {
+        setIsUpdating(false);
+      }
       return;
     }
 
