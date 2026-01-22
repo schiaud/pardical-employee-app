@@ -340,7 +340,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
     }
   };
 
-  const handleLabelPurchased = async (trackingNumber: string, carrierName: string) => {
+  const handleLabelPurchased = async (trackingNumber: string, carrierName: string, shipPrice: string) => {
     // Update local state
     setTracking(trackingNumber);
     setCarrier(carrierName);
@@ -352,6 +352,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
       await updateDoc(orderRef, {
         tracking: trackingNumber,
         carrier: carrierName,
+        shipPrice: shipPrice,
         updatedAt: new Date().toISOString(),
       });
 

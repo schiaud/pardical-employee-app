@@ -40,7 +40,7 @@ interface ShippingDialogProps {
   open: boolean;
   onClose: () => void;
   order?: Order;
-  onLabelPurchased?: (trackingNumber: string, carrier: string) => void;
+  onLabelPurchased?: (trackingNumber: string, carrier: string, shipPrice: string) => void;
 }
 
 // Warehouse address for quick-fill
@@ -271,9 +271,10 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
       };
       await addDoc(collection(db, 'shipments'), shipmentData);
 
-      // Call callback to update ticket with tracking info
+      // Call callback to update ticket with tracking info and shipping price
       if (onLabelPurchased && finalResult.trackingNumber && finalResult.carrier) {
-        onLabelPurchased(finalResult.trackingNumber, finalResult.carrier);
+        const shipPrice = selectedRateData?.amount || '0';
+        onLabelPurchased(finalResult.trackingNumber, finalResult.carrier, shipPrice);
       }
     } catch (err) {
       console.error('Error purchasing label:', err);
