@@ -66,6 +66,7 @@ export interface Shipment {
   orderNumber?: string;
   createdAt: string;
   createdBy: string;
+  price?: string;
 }
 
 /**

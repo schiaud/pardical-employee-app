@@ -268,6 +268,7 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
         orderNumber: order?.orderNumber,
         createdAt: new Date().toISOString(),
         createdBy: user?.displayName || user?.email || 'unknown',
+        price: selectedRateData?.amount,
       };
       await addDoc(collection(db, 'shipments'), shipmentData);
 

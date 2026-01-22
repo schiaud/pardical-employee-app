@@ -152,6 +152,18 @@ export const ShipmentList: React.FC = () => {
                   </Box>
                 )}
 
+                {/* Price */}
+                {shipment.price && (
+                  <Box>
+                    <Typography sx={{ fontSize: '11px', color: '#71717a', textTransform: 'uppercase', mb: 0.25 }}>
+                      Cost
+                    </Typography>
+                    <Typography sx={{ fontSize: '13px', color: '#22c55e', fontWeight: 500 }}>
+                      ${shipment.price}
+                    </Typography>
+                  </Box>
+                )}
+
                 {/* Date */}
                 <Box>
                   <Typography sx={{ fontSize: '11px', color: '#71717a', textTransform: 'uppercase', mb: 0.25 }}>
