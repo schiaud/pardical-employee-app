@@ -43,7 +43,8 @@ export const Layout: React.FC = () => {
   const tabValue = location.pathname === '/reports/employees' ? 1 :
                    location.pathname === '/reports/items' ? 2 :
                    location.pathname === '/reports/stale' ? 3 :
-                   location.pathname === '/customers' ? 4 : 0;
+                   location.pathname === '/customers' ? 4 :
+                   location.pathname === '/shipments' ? 5 : 0;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -77,6 +78,7 @@ export const Layout: React.FC = () => {
               { label: 'Items', value: 2, path: '/reports/items' },
               { label: 'Stale', value: 3, path: '/reports/stale' },
               { label: 'Customers', value: 4, path: '/customers' },
+              { label: 'Shipments', value: 5, path: '/shipments' },
             ].map((tab) => (
               <Button
                 key={tab.value}

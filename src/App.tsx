@@ -10,6 +10,7 @@ import { EmployeeReport } from './components/Reports/EmployeeReport';
 import { ItemReport } from './components/Reports/ItemReport';
 import { StaleItemsReport } from './components/Reports/StaleItemsReport';
 import { CustomerList } from './components/Customers/CustomerList';
+import { ShipmentList } from './components/Shipments/ShipmentList';
 
 const theme = createTheme({
   palette: {
@@ -100,6 +101,7 @@ function App() {
               <Route path="reports/items" element={<ItemReport />} />
               <Route path="reports/stale" element={<StaleItemsReport />} />
               <Route path="customers" element={<CustomerList />} />
+              <Route path="shipments" element={<ShipmentList />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

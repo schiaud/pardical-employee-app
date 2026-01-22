@@ -44,9 +44,19 @@ interface LabelRequest {
 }
 
 interface LabelResult {
+  transactionId: string;
   trackingNumber: string;
   labelUrl: string;
   carrier: string;
+}
+
+interface GetLabelRequest {
+  transactionId: string;
+}
+
+interface GetLabelResult {
+  labelUrl: string;
+  trackingNumber: string;
 }
 
 /**
@@ -221,17 +231,92 @@ export const purchaseShippingLabel = onCall<LabelRequest>(
       }
 
       logger.info("Label purchased successfully", {
+        transactionId: data.object_id,
         tracking: data.tracking_number,
         carrier: data.rate?.provider,
       });
 
       return {
+        transactionId: data.object_id,
         trackingNumber: data.tracking_number,
         labelUrl: data.label_url,
         carrier: data.rate?.provider || "Unknown",
       };
     } catch (error) {
       logger.error("Error purchasing label:", error);
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError(
+        "internal",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    }
+  }
+);
+
+/**
+ * Get a fresh label URL from Shippo using the transaction ID
+ * Used for label recovery when the original URL expires
+ */
+export const getShipmentLabel = onCall<GetLabelRequest>(
+  {
+    cors: true,
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+    secrets: [shippoApiKey],
+  },
+  async (request): Promise<GetLabelResult> => {
+    const {transactionId} = request.data;
+
+    if (!transactionId) {
+      throw new HttpsError(
+        "invalid-argument",
+        "transactionId is required"
+      );
+    }
+
+    logger.info("Retrieving label for transaction", {transactionId});
+
+    try {
+      const response = await fetch(`${SHIPPO_API_BASE}/transactions/${transactionId}`, {
+        method: "GET",
+        headers: {
+          "Authorization": `ShippoToken ${shippoApiKey.value()}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error("Shippo API error", {status: response.status, error: errorText});
+        throw new HttpsError(
+          "unavailable",
+          `Shippo API error: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+
+      if (data.status !== "SUCCESS") {
+        throw new HttpsError(
+          "not-found",
+          "Transaction not found or label not available"
+        );
+      }
+
+      logger.info("Label retrieved successfully", {
+        transactionId,
+        tracking: data.tracking_number,
+      });
+
+      return {
+        labelUrl: data.label_url,
+        trackingNumber: data.tracking_number,
+      };
+    } catch (error) {
+      logger.error("Error retrieving label:", error);
       if (error instanceof HttpsError) {
         throw error;
       }

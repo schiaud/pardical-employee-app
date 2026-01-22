@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -13,6 +13,10 @@ import {
   FormControlLabel,
   Checkbox,
   Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -22,11 +26,18 @@ import {
   Address,
   ShippingRate,
   LabelResult,
+  Shipment,
 } from '../../services/shippoShipping';
+import { Order } from '../../types';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
+import { useAuth } from '../Auth/AuthContext';
 
 interface ShippingDialogProps {
   open: boolean;
   onClose: () => void;
+  order?: Order;
+  onLabelPurchased?: (trackingNumber: string, carrier: string) => void;
 }
 
 // Warehouse address for quick-fill
@@ -41,8 +52,10 @@ const WAREHOUSE_ADDRESS: Address = {
 };
 
 type Step = 'form' | 'rates' | 'success';
+type ToAddressSource = 'manual' | 'customer' | 'warehouse';
 
-export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose }) => {
+export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, order, onLabelPurchased }) => {
+  const { user } = useAuth();
   const [step, setStep] = useState<Step>('form');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +78,7 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose })
   const [toState, setToState] = useState('');
   const [toZip, setToZip] = useState('');
   const [toCountry, setToCountry] = useState('US');
-  const [useWarehouseTo, setUseWarehouseTo] = useState(false);
+  const [toAddressSource, setToAddressSource] = useState<ToAddressSource>('manual');
 
   // Package dimensions
   const [weightLbs, setWeightLbs] = useState('');
@@ -81,6 +94,39 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose })
   // Success step
   const [labelResult, setLabelResult] = useState<LabelResult | null>(null);
 
+  // Initialize addresses when opened with an order
+  useEffect(() => {
+    if (open && order) {
+      // Pre-fill FROM as warehouse when opened from a ticket
+      handleUseWarehouseFrom(true);
+      // If customer has address, pre-select customer as TO
+      if (order.shipAddress && order.shipCity && order.shipState && order.shipZip) {
+        handleToAddressSourceChange('customer');
+      }
+    }
+  }, [open, order?.id]);
+
+  const handleToAddressSourceChange = (source: ToAddressSource) => {
+    setToAddressSource(source);
+    if (source === 'customer' && order) {
+      setToName(order.shipName || order.buyerUsername || '');
+      setToStreet1(order.shipAddress || '');
+      setToStreet2(order.shipAddress2 || '');
+      setToCity(order.shipCity || '');
+      setToState(order.shipState || '');
+      setToZip(order.shipZip || '');
+      setToCountry(order.shipCountry || 'US');
+    } else if (source === 'warehouse') {
+      setToName(WAREHOUSE_ADDRESS.name);
+      setToStreet1(WAREHOUSE_ADDRESS.street1);
+      setToStreet2(WAREHOUSE_ADDRESS.street2 || '');
+      setToCity(WAREHOUSE_ADDRESS.city);
+      setToState(WAREHOUSE_ADDRESS.state);
+      setToZip(WAREHOUSE_ADDRESS.zip);
+      setToCountry(WAREHOUSE_ADDRESS.country);
+    }
+  };
+
   const handleUseWarehouseFrom = (checked: boolean) => {
     setUseWarehouseFrom(checked);
     if (checked) {
@@ -91,19 +137,6 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose })
       setFromState(WAREHOUSE_ADDRESS.state);
       setFromZip(WAREHOUSE_ADDRESS.zip);
       setFromCountry(WAREHOUSE_ADDRESS.country);
-    }
-  };
-
-  const handleUseWarehouseTo = (checked: boolean) => {
-    setUseWarehouseTo(checked);
-    if (checked) {
-      setToName(WAREHOUSE_ADDRESS.name);
-      setToStreet1(WAREHOUSE_ADDRESS.street1);
-      setToStreet2(WAREHOUSE_ADDRESS.street2 || '');
-      setToCity(WAREHOUSE_ADDRESS.city);
-      setToState(WAREHOUSE_ADDRESS.state);
-      setToZip(WAREHOUSE_ADDRESS.zip);
-      setToCountry(WAREHOUSE_ADDRESS.country);
     }
   };
 
@@ -169,11 +202,36 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose })
       const result = await purchaseShippingLabel(selectedRate);
       // Get carrier from our rates since Shippo transaction doesn't return it reliably
       const selectedRateData = rates.find((r) => r.objectId === selectedRate);
-      setLabelResult({
+      const finalResult = {
         ...result,
         carrier: selectedRateData?.provider || result.carrier,
-      });
+      };
+      setLabelResult(finalResult);
       setStep('success');
+
+      // Save shipment to Firestore for label recovery
+      const shipmentData: Omit<Shipment, 'id'> = {
+        transactionId: finalResult.transactionId,
+        trackingNumber: finalResult.trackingNumber,
+        carrier: finalResult.carrier,
+        labelUrl: finalResult.labelUrl,
+        fromName: fromName,
+        fromCity: fromCity,
+        fromState: fromState,
+        toName: toName,
+        toCity: toCity,
+        toState: toState,
+        orderId: order?.id,
+        orderNumber: order?.orderNumber,
+        createdAt: new Date().toISOString(),
+        createdBy: user?.displayName || user?.email || 'unknown',
+      };
+      await addDoc(collection(db, 'shipments'), shipmentData);
+
+      // Call callback to update ticket with tracking info
+      if (onLabelPurchased && finalResult.trackingNumber && finalResult.carrier) {
+        onLabelPurchased(finalResult.trackingNumber, finalResult.carrier);
+      }
     } catch (err) {
       console.error('Error purchasing label:', err);
       setError(err instanceof Error ? err.message : 'Failed to purchase label');
@@ -204,7 +262,7 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose })
     setToState('');
     setToZip('');
     setToCountry('US');
-    setUseWarehouseTo(false);
+    setToAddressSource('manual');
     setWeightLbs('');
     setWeightOz('');
     setLength('');
@@ -332,17 +390,21 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose })
                 Ship To
               </Typography>
             </Box>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={useWarehouseTo}
-                  onChange={(e) => handleUseWarehouseTo(e.target.checked)}
-                  size="small"
-                  sx={{ '& .MuiSvgIcon-root': { fontSize: 18 } }}
-                />
-              }
-              label={<Typography sx={{ fontSize: '12px', color: '#a1a1aa' }}>Use Warehouse</Typography>}
-            />
+            <FormControl size="small" sx={{ minWidth: 150 }}>
+              <Select
+                value={toAddressSource}
+                onChange={(e) => handleToAddressSourceChange(e.target.value as ToAddressSource)}
+                displayEmpty
+                sx={{
+                  fontSize: '12px',
+                  '& .MuiSelect-select': { py: 0.75 },
+                }}
+              >
+                <MenuItem value="manual">Manual Entry</MenuItem>
+                {order && <MenuItem value="customer">Customer Address</MenuItem>}
+                <MenuItem value="warehouse">Warehouse</MenuItem>
+              </Select>
+            </FormControl>
           </Box>
 
           <Grid container spacing={2}>

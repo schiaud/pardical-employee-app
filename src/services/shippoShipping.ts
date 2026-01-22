@@ -38,9 +38,28 @@ export interface ShippingRate {
 }
 
 export interface LabelResult {
+  transactionId: string;
   trackingNumber: string;
   labelUrl: string;
   carrier: string;
+}
+
+export interface Shipment {
+  id?: string;
+  transactionId: string;
+  trackingNumber: string;
+  carrier: string;
+  labelUrl: string;
+  fromName: string;
+  fromCity: string;
+  fromState: string;
+  toName: string;
+  toCity: string;
+  toState: string;
+  orderId?: string;
+  orderNumber?: string;
+  createdAt: string;
+  createdBy: string;
 }
 
 /**
@@ -61,4 +80,15 @@ export async function getShippingRates(
 export async function purchaseShippingLabel(rateId: string): Promise<LabelResult> {
   const result = await purchaseShippingLabelFn({ rateId });
   return result.data as LabelResult;
+}
+
+const getShipmentLabelFn = httpsCallable(functions, 'getShipmentLabel');
+
+/**
+ * Get a fresh label URL from a transaction ID
+ * Used for label recovery when original URL expires
+ */
+export async function getShipmentLabel(transactionId: string): Promise<{ labelUrl: string; trackingNumber: string }> {
+  const result = await getShipmentLabelFn({ transactionId });
+  return result.data as { labelUrl: string; trackingNumber: string };
 }

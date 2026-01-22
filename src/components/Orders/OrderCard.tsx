@@ -16,6 +16,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PhoneIcon from '@mui/icons-material/Phone';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import EditIcon from '@mui/icons-material/Edit';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import { doc, updateDoc, deleteDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import { useAuth } from '../Auth/AuthContext';
@@ -26,6 +27,7 @@ import { ClickableItemTitle } from './ClickableItemTitle';
 import { Order, OrderStatus } from '../../types';
 import { TrackingProgressBar } from './TrackingProgressBar';
 import { getTrackingStatus, shouldFetchTracking, type TrackingStatus } from '../../services/shippo';
+import { ShippingDialog } from '../Shipping/ShippingDialog';
 
 interface OrderCardProps {
   order: Order;
@@ -102,6 +104,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [replacementDialogOpen, setReplacementDialogOpen] = useState(false);
   const [itemProfileOpen, setItemProfileOpen] = useState(false);
+  const [shippingDialogOpen, setShippingDialogOpen] = useState(false);
   const [isTrackingLoading, setIsTrackingLoading] = useState(false);
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus | undefined>(order.trackingStatus);
   const [trackingStatusDetails, setTrackingStatusDetails] = useState(order.trackingStatusDetails);
@@ -334,6 +337,31 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
       console.error('Error deleting order:', error);
       alert('Failed to delete order. Please try again.');
       setIsDeleting(false);
+    }
+  };
+
+  const handleLabelPurchased = async (trackingNumber: string, carrierName: string) => {
+    // Update local state
+    setTracking(trackingNumber);
+    setCarrier(carrierName);
+
+    // Save to Firestore
+    try {
+      const collectionName = order._collection || 'orders';
+      const orderRef = doc(db, collectionName, order.id);
+      await updateDoc(orderRef, {
+        tracking: trackingNumber,
+        carrier: carrierName,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Auto-refresh tracking status after a brief delay
+      setTimeout(() => {
+        fetchTrackingStatus(true);
+      }, 1000);
+    } catch (error) {
+      console.error('Error saving tracking to order:', error);
+      alert('Label purchased but failed to save tracking to ticket. Please update manually.');
     }
   };
 
@@ -684,6 +712,27 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
           >
             EDIT
           </Button>
+          {!order.tracking && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setShippingDialogOpen(true)}
+              startIcon={<LocalShippingIcon sx={{ fontSize: 14 }} />}
+              sx={{
+                fontSize: '11px',
+                fontWeight: 600,
+                minWidth: 70,
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+              }}
+            >
+              SHIP
+            </Button>
+          )}
           <Button
             variant="contained"
             color="primary"
@@ -739,6 +788,13 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
         onClose={() => setItemProfileOpen(false)}
         itemName={order.item}
         itemId={order.itemId}
+      />
+
+      <ShippingDialog
+        open={shippingDialogOpen}
+        onClose={() => setShippingDialogOpen(false)}
+        order={order}
+        onLabelPurchased={handleLabelPurchased}
       />
     </Card>
   );
