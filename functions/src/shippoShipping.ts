@@ -59,6 +59,18 @@ interface GetLabelResult {
   trackingNumber: string;
 }
 
+interface PickupRequest {
+  transactionId: string;
+  pickupAddress: Address;
+  buildingLocationType: string;
+  instructions?: string;
+}
+
+interface PickupResult {
+  confirmationNumber: string;
+  pickupDate: string;
+}
+
 /**
  * Get shipping rates from Shippo
  * Creates a shipment and returns available rates
@@ -317,6 +329,141 @@ export const getShipmentLabel = onCall<GetLabelRequest>(
       };
     } catch (error) {
       logger.error("Error retrieving label:", error);
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError(
+        "internal",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    }
+  }
+);
+
+/**
+ * Schedule a USPS pickup
+ * Takes a transaction ID and pickup details, returns confirmation
+ */
+export const scheduleUSPSPickup = onCall<PickupRequest>(
+  {
+    cors: true,
+    maxInstances: 10,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [shippoApiKey],
+  },
+  async (request): Promise<PickupResult> => {
+    const {transactionId, pickupAddress, buildingLocationType, instructions} = request.data;
+
+    if (!transactionId || !pickupAddress || !buildingLocationType) {
+      throw new HttpsError(
+        "invalid-argument",
+        "transactionId, pickupAddress, and buildingLocationType are required"
+      );
+    }
+
+    logger.info("Scheduling USPS pickup", {
+      transactionId,
+      address: `${pickupAddress.city}, ${pickupAddress.state}`,
+      location: buildingLocationType,
+    });
+
+    try {
+      // First, get the transaction to get the carrier account
+      const txnResponse = await fetch(`${SHIPPO_API_BASE}/transactions/${transactionId}`, {
+        method: "GET",
+        headers: {
+          "Authorization": `ShippoToken ${shippoApiKey.value()}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!txnResponse.ok) {
+        const errorText = await txnResponse.text();
+        logger.error("Failed to get transaction", {status: txnResponse.status, error: errorText});
+        throw new HttpsError("unavailable", "Failed to get transaction details");
+      }
+
+      const txnData = await txnResponse.json();
+      const carrierAccount = txnData.rate?.carrier_account;
+
+      if (!carrierAccount) {
+        throw new HttpsError("failed-precondition", "Could not find carrier account for this transaction");
+      }
+
+      // Calculate next business day (skip weekends)
+      const today = new Date();
+      const pickupDate = new Date(today);
+      pickupDate.setDate(pickupDate.getDate() + 1);
+
+      // Skip to Monday if it lands on Saturday or Sunday
+      const dayOfWeek = pickupDate.getDay();
+      if (dayOfWeek === 0) pickupDate.setDate(pickupDate.getDate() + 1); // Sunday -> Monday
+      if (dayOfWeek === 6) pickupDate.setDate(pickupDate.getDate() + 2); // Saturday -> Monday
+
+      const pickupDateStr = pickupDate.toISOString().split("T")[0];
+
+      // Create the pickup
+      const response = await fetch(`${SHIPPO_API_BASE}/pickups`, {
+        method: "POST",
+        headers: {
+          "Authorization": `ShippoToken ${shippoApiKey.value()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          carrier_account: carrierAccount,
+          location: {
+            building_location_type: buildingLocationType.toUpperCase().replace(/ /g, "_").replace(/\//g, "_"),
+            building_type: "residential",
+            instructions: instructions || "",
+            address: {
+              name: pickupAddress.name,
+              street1: pickupAddress.street1,
+              street2: pickupAddress.street2 || "",
+              city: pickupAddress.city,
+              state: pickupAddress.state,
+              zip: pickupAddress.zip,
+              country: pickupAddress.country,
+            },
+          },
+          requested_start_time: `${pickupDateStr}T08:00:00Z`,
+          requested_end_time: `${pickupDateStr}T18:00:00Z`,
+          transactions: [transactionId],
+          is_test: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error("Shippo pickup API error", {status: response.status, error: errorText});
+        throw new HttpsError(
+          "unavailable",
+          `Shippo pickup API error: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+
+      // Check pickup status
+      if (data.status === "ERROR") {
+        logger.error("Pickup scheduling failed", {messages: data.messages});
+        throw new HttpsError(
+          "aborted",
+          `Pickup scheduling failed: ${data.messages?.map((m: {text: string}) => m.text).join(", ") || "Unknown error"}`
+        );
+      }
+
+      logger.info("Pickup scheduled successfully", {
+        confirmationNumber: data.confirmation_code,
+        pickupDate: pickupDateStr,
+      });
+
+      return {
+        confirmationNumber: data.confirmation_code || data.object_id,
+        pickupDate: pickupDateStr,
+      };
+    } catch (error) {
+      logger.error("Error scheduling pickup:", error);
       if (error instanceof HttpsError) {
         throw error;
       }

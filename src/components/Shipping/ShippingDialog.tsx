@@ -17,16 +17,19 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Chip,
 } from '@mui/material';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import {
   getShippingRates,
   purchaseShippingLabel,
+  scheduleUSPSPickup,
   Address,
   ShippingRate,
   LabelResult,
   Shipment,
+  PickupResult,
 } from '../../services/shippoShipping';
 import { Order } from '../../types';
 import { collection, addDoc } from 'firebase/firestore';
@@ -51,8 +54,32 @@ const WAREHOUSE_ADDRESS: Address = {
   country: 'US',
 };
 
-type Step = 'form' | 'rates' | 'success';
+type Step = 'form' | 'rates' | 'pickup' | 'success';
 type ToAddressSource = 'manual' | 'customer' | 'warehouse';
+
+// Pickup location options from Shippo API
+const PICKUP_LOCATIONS = [
+  'Front Door',
+  'Back Door',
+  'Side Door',
+  'Knock on Door/Ring Bell',
+  'Mail Room',
+  'Office',
+  'Reception',
+  'In/At Mailbox',
+  'Security Deck',
+  'Shipping Dock',
+  'Other',
+] as const;
+
+// Check if a rate is eligible for free USPS pickup
+const isPickupEligible = (rate: ShippingRate): boolean => {
+  if (rate.provider !== 'USPS') return false;
+  const service = rate.servicelevelName.toLowerCase();
+  return service.includes('priority') ||
+         service.includes('express') ||
+         service.includes('ground advantage');
+};
 
 export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, order, onLabelPurchased }) => {
   const { user } = useAuth();
@@ -93,6 +120,12 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
 
   // Success step
   const [labelResult, setLabelResult] = useState<LabelResult | null>(null);
+
+  // Pickup step
+  const [pickupLocation, setPickupLocation] = useState('Front Door');
+  const [pickupInstructions, setPickupInstructions] = useState('');
+  const [pickupResult, setPickupResult] = useState<PickupResult | null>(null);
+  const [selectedRateIsPickupEligible, setSelectedRateIsPickupEligible] = useState(false);
 
   // Initialize addresses when opened with an order
   useEffect(() => {
@@ -207,7 +240,17 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
         carrier: selectedRateData?.provider || result.carrier,
       };
       setLabelResult(finalResult);
-      setStep('success');
+
+      // Check if selected rate is eligible for free pickup
+      const eligible = selectedRateData ? isPickupEligible(selectedRateData) : false;
+      setSelectedRateIsPickupEligible(eligible);
+
+      // Route to pickup step if eligible, otherwise go to success
+      if (eligible) {
+        setStep('pickup');
+      } else {
+        setStep('success');
+      }
 
       // Save shipment to Firestore for label recovery
       const shipmentData: Omit<Shipment, 'id'> = {
@@ -268,6 +311,11 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
     setLength('');
     setWidth('');
     setHeight('');
+    // Reset pickup state
+    setPickupLocation('Front Door');
+    setPickupInstructions('');
+    setPickupResult(null);
+    setSelectedRateIsPickupEligible(false);
     onClose();
   };
 
@@ -616,9 +664,25 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
                 }}
               >
                 <Box>
-                  <Typography sx={{ fontWeight: 600, fontSize: '14px', color: '#fff' }}>
-                    {rate.provider} - {rate.servicelevelName}
-                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ fontWeight: 600, fontSize: '14px', color: '#fff' }}>
+                      {rate.provider} - {rate.servicelevelName}
+                    </Typography>
+                    {isPickupEligible(rate) && (
+                      <Chip
+                        label="Free Pickup"
+                        size="small"
+                        sx={{
+                          height: '20px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          backgroundColor: '#22c55e',
+                          color: '#fff',
+                          '& .MuiChip-label': { px: 1 },
+                        }}
+                      />
+                    )}
+                  </Box>
                   <Typography sx={{ fontSize: '12px', color: '#a1a1aa' }}>
                     {rate.estimatedDays ? `${rate.estimatedDays} day${rate.estimatedDays > 1 ? 's' : ''}` : 'Delivery time varies'}
                   </Typography>
@@ -656,6 +720,137 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
     </>
   );
 
+  const handleSchedulePickup = async () => {
+    if (!labelResult) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const pickupAddress: Address = {
+        name: fromName,
+        street1: fromStreet1,
+        street2: fromStreet2,
+        city: fromCity,
+        state: fromState,
+        zip: fromZip,
+        country: fromCountry,
+      };
+
+      const result = await scheduleUSPSPickup(
+        labelResult.transactionId,
+        pickupAddress,
+        pickupLocation,
+        pickupInstructions || undefined
+      );
+
+      setPickupResult(result);
+      setStep('success');
+    } catch (err) {
+      console.error('Error scheduling pickup:', err);
+      setError(err instanceof Error ? err.message : 'Failed to schedule pickup');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSkipPickup = () => {
+    setStep('success');
+  };
+
+  const renderPickupStep = () => (
+    <>
+      <DialogContent sx={{ mt: 2 }}>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        <Box sx={{ textAlign: 'center', mb: 3 }}>
+          <LocalShippingIcon sx={{ fontSize: 48, color: '#22c55e', mb: 2 }} />
+          <Typography sx={{ fontSize: '18px', fontWeight: 600, color: '#fff', mb: 1 }}>
+            Schedule Free USPS Pickup?
+          </Typography>
+          <Typography sx={{ fontSize: '14px', color: '#a1a1aa' }}>
+            USPS will pick up your package for free at your location
+          </Typography>
+        </Box>
+
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <Box sx={{ width: 3, height: 12, backgroundColor: '#3b82f6', borderRadius: 1 }} />
+            <Typography sx={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#71717a' }}>
+              Pickup Details
+            </Typography>
+          </Box>
+
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel sx={{ fontSize: '13px' }}>Package Location</InputLabel>
+                <Select
+                  value={pickupLocation}
+                  onChange={(e) => setPickupLocation(e.target.value)}
+                  label="Package Location"
+                  sx={{ fontSize: '13px' }}
+                >
+                  {PICKUP_LOCATIONS.map((location) => (
+                    <MenuItem key={location} value={location}>
+                      {location}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              <TextField
+                label="Special Instructions (optional)"
+                value={pickupInstructions}
+                onChange={(e) => setPickupInstructions(e.target.value)}
+                fullWidth
+                size="small"
+                multiline
+                rows={2}
+                placeholder="e.g., Package is under the mat, ring doorbell twice..."
+                sx={{
+                  '& .MuiInputBase-input': { fontSize: '13px' },
+                  '& .MuiInputLabel-root': { fontSize: '13px' },
+                }}
+              />
+            </Grid>
+          </Grid>
+        </Box>
+
+        <Alert severity="info" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6' }}>
+          Pickup will be scheduled for the next business day. Make sure your package is ready!
+        </Alert>
+      </DialogContent>
+
+      <DialogActions sx={{ borderTop: '1px solid #27272a', p: 2 }}>
+        <Button
+          onClick={handleSkipPickup}
+          variant="outlined"
+          sx={{
+            borderColor: '#27272a',
+            color: '#a1a1aa',
+            '&:hover': { borderColor: '#52525b' },
+          }}
+        >
+          Skip
+        </Button>
+        <Button
+          onClick={handleSchedulePickup}
+          variant="contained"
+          disabled={isLoading}
+          sx={{ minWidth: 160, backgroundColor: '#22c55e', '&:hover': { backgroundColor: '#16a34a' } }}
+        >
+          {isLoading ? <CircularProgress size={20} /> : 'Schedule Pickup'}
+        </Button>
+      </DialogActions>
+    </>
+  );
+
   const renderSuccessStep = () => (
     <>
       <DialogContent sx={{ mt: 2 }}>
@@ -669,10 +864,10 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
         >
           <CheckCircleIcon sx={{ fontSize: 64, color: '#22c55e', mb: 2 }} />
           <Typography sx={{ fontSize: '20px', fontWeight: 600, color: '#fff', mb: 1 }}>
-            Label Purchased!
+            {pickupResult ? 'Label & Pickup Scheduled!' : 'Label Purchased!'}
           </Typography>
           <Typography sx={{ fontSize: '14px', color: '#a1a1aa', mb: 3 }}>
-            Your shipping label is ready
+            {pickupResult ? 'Your shipping label and pickup are ready' : 'Your shipping label is ready'}
           </Typography>
 
           <Box
@@ -692,7 +887,7 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
                 {labelResult?.carrier}
               </Typography>
             </Box>
-            <Box>
+            <Box sx={{ mb: pickupResult ? 2 : 0 }}>
               <Typography sx={{ fontSize: '11px', color: '#71717a', textTransform: 'uppercase' }}>
                 Tracking Number
               </Typography>
@@ -700,6 +895,37 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
                 {labelResult?.trackingNumber}
               </Typography>
             </Box>
+            {pickupResult && (
+              <>
+                <Box sx={{ mb: 2 }}>
+                  <Typography sx={{ fontSize: '11px', color: '#71717a', textTransform: 'uppercase' }}>
+                    Pickup Confirmation
+                  </Typography>
+                  <Typography sx={{ fontSize: '16px', color: '#22c55e', fontWeight: 500, fontFamily: 'monospace' }}>
+                    {pickupResult.confirmationNumber}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography sx={{ fontSize: '11px', color: '#71717a', textTransform: 'uppercase' }}>
+                    Pickup Location
+                  </Typography>
+                  <Typography sx={{ fontSize: '14px', color: '#fff', fontWeight: 500 }}>
+                    {pickupLocation}
+                  </Typography>
+                </Box>
+                <Alert
+                  severity="success"
+                  sx={{
+                    mt: 2,
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px solid #22c55e',
+                    '& .MuiAlert-icon': { color: '#22c55e' },
+                  }}
+                >
+                  Pickup scheduled for next business day
+                </Alert>
+              </>
+            )}
           </Box>
         </Box>
       </DialogContent>
@@ -747,13 +973,15 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
           <Typography sx={{ fontWeight: 600, fontSize: '18px', color: '#fff' }}>
             {step === 'form' && 'Create Shipping Label'}
             {step === 'rates' && 'Select Shipping Rate'}
-            {step === 'success' && 'Label Purchased'}
+            {step === 'pickup' && 'Schedule Pickup'}
+            {step === 'success' && (pickupResult ? 'Label & Pickup Confirmed' : 'Label Purchased')}
           </Typography>
         </Box>
       </DialogTitle>
 
       {step === 'form' && renderFormStep()}
       {step === 'rates' && renderRatesStep()}
+      {step === 'pickup' && renderPickupStep()}
       {step === 'success' && renderSuccessStep()}
     </Dialog>
   );

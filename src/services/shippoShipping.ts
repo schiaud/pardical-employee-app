@@ -9,6 +9,7 @@ import { app } from './firebase';
 const functions = getFunctions(app);
 const getShippingRatesFn = httpsCallable(functions, 'getShippingRates');
 const purchaseShippingLabelFn = httpsCallable(functions, 'purchaseShippingLabel');
+const scheduleUSPSPickupFn = httpsCallable(functions, 'scheduleUSPSPickup');
 
 // Types
 export interface Address {
@@ -42,6 +43,11 @@ export interface LabelResult {
   trackingNumber: string;
   labelUrl: string;
   carrier: string;
+}
+
+export interface PickupResult {
+  confirmationNumber: string;
+  pickupDate: string;
 }
 
 export interface Shipment {
@@ -80,6 +86,24 @@ export async function getShippingRates(
 export async function purchaseShippingLabel(rateId: string): Promise<LabelResult> {
   const result = await purchaseShippingLabelFn({ rateId });
   return result.data as LabelResult;
+}
+
+/**
+ * Schedule a free USPS pickup
+ */
+export async function scheduleUSPSPickup(
+  transactionId: string,
+  pickupAddress: Address,
+  buildingLocationType: string,
+  instructions?: string
+): Promise<PickupResult> {
+  const result = await scheduleUSPSPickupFn({
+    transactionId,
+    pickupAddress,
+    buildingLocationType,
+    instructions,
+  });
+  return result.data as PickupResult;
 }
 
 const getShipmentLabelFn = httpsCallable(functions, 'getShipmentLabel');
