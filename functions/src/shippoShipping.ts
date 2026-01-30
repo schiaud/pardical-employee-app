@@ -28,6 +28,7 @@ interface RatesRequest {
   fromAddress: Address;
   toAddress: Address;
   parcel: Parcel;
+  returnAddress?: Address; // Optional: separate return address for failed deliveries
 }
 
 interface ShippingRate {
@@ -59,6 +60,15 @@ interface GetLabelResult {
   trackingNumber: string;
 }
 
+interface VoidLabelRequest {
+  transactionId: string;
+}
+
+interface VoidLabelResult {
+  refundId: string;
+  status: "QUEUED" | "PENDING" | "SUCCESS" | "ERROR";
+}
+
 interface PickupRequest {
   transactionId: string;
   pickupAddress: Address;
@@ -84,7 +94,7 @@ export const getShippingRates = onCall<RatesRequest>(
     secrets: [shippoApiKey],
   },
   async (request): Promise<ShippingRate[]> => {
-    const {fromAddress, toAddress, parcel} = request.data;
+    const {fromAddress, toAddress, parcel, returnAddress} = request.data;
 
     // Validate input
     if (!fromAddress || !toAddress || !parcel) {
@@ -97,6 +107,7 @@ export const getShippingRates = onCall<RatesRequest>(
     logger.info("Creating Shippo shipment for rates", {
       from: `${fromAddress.city}, ${fromAddress.state}`,
       to: `${toAddress.city}, ${toAddress.state}`,
+      returnTo: returnAddress ? `${returnAddress.city}, ${returnAddress.state}` : "same as from",
       weight: parcel.weight,
     });
 
@@ -126,6 +137,18 @@ export const getShippingRates = onCall<RatesRequest>(
             zip: toAddress.zip,
             country: toAddress.country,
           },
+          // Optional: separate return address for failed deliveries (USPS, FedEx, UPS)
+          ...(returnAddress && {
+            address_return: {
+              name: returnAddress.name,
+              street1: returnAddress.street1,
+              street2: returnAddress.street2 || "",
+              city: returnAddress.city,
+              state: returnAddress.state,
+              zip: returnAddress.zip,
+              country: returnAddress.country,
+            },
+          }),
           parcels: [
             {
               length: String(parcel.length),
@@ -329,6 +352,76 @@ export const getShipmentLabel = onCall<GetLabelRequest>(
       };
     } catch (error) {
       logger.error("Error retrieving label:", error);
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError(
+        "internal",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    }
+  }
+);
+
+/**
+ * Void/refund an unused shipping label
+ * Takes a transaction ID and requests a refund from Shippo
+ * Refunds typically process within 14 business days
+ */
+export const voidShippingLabel = onCall<VoidLabelRequest>(
+  {
+    cors: true,
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+    secrets: [shippoApiKey],
+  },
+  async (request): Promise<VoidLabelResult> => {
+    const {transactionId} = request.data;
+
+    if (!transactionId) {
+      throw new HttpsError(
+        "invalid-argument",
+        "transactionId is required"
+      );
+    }
+
+    logger.info("Requesting label refund", {transactionId});
+
+    try {
+      const response = await fetch(`${SHIPPO_API_BASE}/refunds`, {
+        method: "POST",
+        headers: {
+          "Authorization": `ShippoToken ${shippoApiKey.value()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          transaction: transactionId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error("Shippo refund API error", {status: response.status, error: errorText});
+        throw new HttpsError(
+          "unavailable",
+          `Shippo API error: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+
+      logger.info("Refund request submitted", {
+        refundId: data.object_id,
+        status: data.status,
+      });
+
+      return {
+        refundId: data.object_id,
+        status: data.status,
+      };
+    } catch (error) {
+      logger.error("Error requesting refund:", error);
       if (error instanceof HttpsError) {
         throw error;
       }

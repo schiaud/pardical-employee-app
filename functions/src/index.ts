@@ -31,8 +31,11 @@ export {populateTestSales} from "./populateTestSales";
 // Shippo tracking function
 export {getShippoTracking} from "./shippoTracking";
 
-// Shippo shipping functions (rates + label purchase + label retrieval + pickup)
-export {getShippingRates, purchaseShippingLabel, getShipmentLabel, scheduleUSPSPickup} from "./shippoShipping";
+// Shippo shipping functions (rates + label purchase + label retrieval + void + pickup)
+export {getShippingRates, purchaseShippingLabel, getShipmentLabel, voidShippingLabel, scheduleUSPSPickup} from "./shippoShipping";
+
+// Search function
+export {searchOrdersAndReturns} from "./search";
 
 /**
  * eBay Webhook Handler

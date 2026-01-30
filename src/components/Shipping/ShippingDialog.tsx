@@ -96,6 +96,7 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
   const [fromZip, setFromZip] = useState('');
   const [fromCountry, setFromCountry] = useState('US');
   const [useWarehouseFrom, setUseWarehouseFrom] = useState(false);
+  const [useWarehouseAsReturn, setUseWarehouseAsReturn] = useState(false);
 
   // TO address
   const [toName, setToName] = useState('');
@@ -170,6 +171,11 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
       setFromState(WAREHOUSE_ADDRESS.state);
       setFromZip(WAREHOUSE_ADDRESS.zip);
       setFromCountry(WAREHOUSE_ADDRESS.country);
+      // No need for separate return address when shipping from warehouse
+      setUseWarehouseAsReturn(false);
+    } else {
+      // When shipping from alternate location, default to warehouse as return address
+      setUseWarehouseAsReturn(true);
     }
   };
 
@@ -208,7 +214,10 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
         weight: totalOunces || 16, // Default 1 lb if not specified
       };
 
-      const fetchedRates = await getShippingRates(fromAddress, toAddress, parcel);
+      // Pass warehouse as return address if shipping from alternate location
+      const returnAddress = useWarehouseAsReturn ? WAREHOUSE_ADDRESS : undefined;
+
+      const fetchedRates = await getShippingRates(fromAddress, toAddress, parcel, returnAddress);
 
       // Sort by price (cheapest first)
       const sortedRates = fetchedRates.sort(
@@ -300,6 +309,7 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
     setFromZip('');
     setFromCountry('US');
     setUseWarehouseFrom(false);
+    setUseWarehouseAsReturn(false);
     setToName('');
     setToStreet1('');
     setToStreet2('');
@@ -344,17 +354,36 @@ export const ShippingDialog: React.FC<ShippingDialogProps> = ({ open, onClose, o
                 Ship From
               </Typography>
             </Box>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={useWarehouseFrom}
-                  onChange={(e) => handleUseWarehouseFrom(e.target.checked)}
-                  size="small"
-                  sx={{ '& .MuiSvgIcon-root': { fontSize: 18 } }}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={useWarehouseFrom}
+                    onChange={(e) => handleUseWarehouseFrom(e.target.checked)}
+                    size="small"
+                    sx={{ '& .MuiSvgIcon-root': { fontSize: 18 } }}
+                  />
+                }
+                label={<Typography sx={{ fontSize: '12px', color: '#a1a1aa' }}>Use Warehouse</Typography>}
+              />
+              {!useWarehouseFrom && (
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={useWarehouseAsReturn}
+                      onChange={(e) => setUseWarehouseAsReturn(e.target.checked)}
+                      size="small"
+                      sx={{ '& .MuiSvgIcon-root': { fontSize: 18 } }}
+                    />
+                  }
+                  label={
+                    <Typography sx={{ fontSize: '12px', color: '#22c55e' }}>
+                      Return to Warehouse
+                    </Typography>
+                  }
                 />
-              }
-              label={<Typography sx={{ fontSize: '12px', color: '#a1a1aa' }}>Use Warehouse</Typography>}
-            />
+              )}
+            </Box>
           </Box>
 
           <Grid container spacing={2}>

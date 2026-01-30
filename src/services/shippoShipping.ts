@@ -9,6 +9,7 @@ import { app } from './firebase';
 const functions = getFunctions(app);
 const getShippingRatesFn = httpsCallable(functions, 'getShippingRates');
 const purchaseShippingLabelFn = httpsCallable(functions, 'purchaseShippingLabel');
+const voidShippingLabelFn = httpsCallable(functions, 'voidShippingLabel');
 const scheduleUSPSPickupFn = httpsCallable(functions, 'scheduleUSPSPickup');
 
 // Types
@@ -50,6 +51,11 @@ export interface PickupResult {
   pickupDate: string;
 }
 
+export interface VoidResult {
+  refundId: string;
+  status: 'QUEUED' | 'PENDING' | 'SUCCESS' | 'ERROR';
+}
+
 export interface Shipment {
   id?: string;
   transactionId: string;
@@ -67,17 +73,23 @@ export interface Shipment {
   createdAt: string;
   createdBy: string;
   price?: string;
+  // Void/refund tracking
+  refundId?: string;
+  refundStatus?: 'QUEUED' | 'PENDING' | 'SUCCESS' | 'ERROR';
+  refundedAt?: string;
 }
 
 /**
  * Get shipping rates from Shippo
+ * @param returnAddress Optional separate return address for failed deliveries (works with USPS, FedEx, UPS)
  */
 export async function getShippingRates(
   fromAddress: Address,
   toAddress: Address,
-  parcel: Parcel
+  parcel: Parcel,
+  returnAddress?: Address
 ): Promise<ShippingRate[]> {
-  const result = await getShippingRatesFn({ fromAddress, toAddress, parcel });
+  const result = await getShippingRatesFn({ fromAddress, toAddress, parcel, returnAddress });
   return result.data as ShippingRate[];
 }
 
@@ -116,4 +128,14 @@ const getShipmentLabelFn = httpsCallable(functions, 'getShipmentLabel');
 export async function getShipmentLabel(transactionId: string): Promise<{ labelUrl: string; trackingNumber: string }> {
   const result = await getShipmentLabelFn({ transactionId });
   return result.data as { labelUrl: string; trackingNumber: string };
+}
+
+/**
+ * Void/refund an unused shipping label
+ * Must be requested within 90 days of purchase
+ * Typically processes within 14 business days
+ */
+export async function voidShippingLabel(transactionId: string): Promise<VoidResult> {
+  const result = await voidShippingLabelFn({ transactionId });
+  return result.data as VoidResult;
 }

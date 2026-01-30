@@ -10,14 +10,16 @@ import {
 import PrintIcon from '@mui/icons-material/Print';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import BlockIcon from '@mui/icons-material/Block';
+import { collection, query, orderBy, limit, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
-import { getShipmentLabel, Shipment } from '../../services/shippoShipping';
+import { getShipmentLabel, voidShippingLabel, Shipment } from '../../services/shippoShipping';
 
 export const ShipmentList: React.FC = () => {
   const [shipments, setShipments] = useState<(Shipment & { id: string })[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [printingId, setPrintingId] = useState<string | null>(null);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
 
   useEffect(() => {
     const shipmentsRef = collection(db, 'shipments');
@@ -49,6 +51,31 @@ export const ShipmentList: React.FC = () => {
       alert('Failed to retrieve label. Please try again.');
     } finally {
       setPrintingId(null);
+    }
+  };
+
+  const handleVoidLabel = async (shipment: Shipment & { id: string }) => {
+    if (!confirm(`Void label for ${shipment.trackingNumber}?\n\nThis will request a refund from Shippo. The label will no longer be usable.`)) {
+      return;
+    }
+
+    setVoidingId(shipment.id);
+    try {
+      const result = await voidShippingLabel(shipment.transactionId);
+
+      // Update shipment in Firestore with refund info
+      await updateDoc(doc(db, 'shipments', shipment.id), {
+        refundId: result.refundId,
+        refundStatus: result.status,
+        refundedAt: new Date().toISOString(),
+      });
+
+      alert(`Refund ${result.status === 'SUCCESS' ? 'approved' : 'requested'}!\n\nStatus: ${result.status}\nRefund ID: ${result.refundId}`);
+    } catch (error) {
+      console.error('Error voiding label:', error);
+      alert('Failed to void label. It may have already been used or the refund window has passed.');
+    } finally {
+      setVoidingId(null);
     }
   };
 
@@ -183,6 +210,29 @@ export const ShipmentList: React.FC = () => {
                     {shipment.createdBy}
                   </Typography>
                 </Box>
+
+                {/* Refund Status */}
+                {shipment.refundStatus && (
+                  <Box>
+                    <Typography sx={{ fontSize: '11px', color: '#71717a', textTransform: 'uppercase', mb: 0.25 }}>
+                      Refund
+                    </Typography>
+                    <Typography
+                      sx={{
+                        fontSize: '13px',
+                        fontWeight: 500,
+                        color:
+                          shipment.refundStatus === 'SUCCESS'
+                            ? '#22c55e'
+                            : shipment.refundStatus === 'ERROR'
+                            ? '#ef4444'
+                            : '#f59e0b',
+                      }}
+                    >
+                      {shipment.refundStatus}
+                    </Typography>
+                  </Box>
+                )}
               </Box>
 
               {/* Actions */}
@@ -227,6 +277,30 @@ export const ShipmentList: React.FC = () => {
                   >
                     <RefreshIcon />
                   </IconButton>
+                </Tooltip>
+                <Tooltip title={shipment.refundStatus ? `Refund ${shipment.refundStatus}` : 'Void label'}>
+                  <span>
+                    <IconButton
+                      onClick={() => handleVoidLabel(shipment)}
+                      disabled={voidingId === shipment.id || !!shipment.refundStatus}
+                      sx={{
+                        color: shipment.refundStatus ? '#71717a' : '#ef4444',
+                        backgroundColor: shipment.refundStatus ? 'transparent' : 'rgba(239, 68, 68, 0.1)',
+                        '&:hover': {
+                          backgroundColor: shipment.refundStatus ? 'transparent' : 'rgba(239, 68, 68, 0.2)',
+                        },
+                        '&.Mui-disabled': {
+                          color: '#52525b',
+                        },
+                      }}
+                    >
+                      {voidingId === shipment.id ? (
+                        <CircularProgress size={20} sx={{ color: '#ef4444' }} />
+                      ) : (
+                        <BlockIcon />
+                      )}
+                    </IconButton>
+                  </span>
                 </Tooltip>
               </Box>
             </Card>
