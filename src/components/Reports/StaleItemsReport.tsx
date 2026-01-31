@@ -58,6 +58,7 @@ import {
   getLatestPricingData,
   getLatestEbayMetrics,
   markItemReviewed,
+  unmarkItemReviewed,
 } from '../../services/staleItems';
 import {
   ItemStats,
@@ -79,6 +80,7 @@ export const StaleItemsReport: React.FC = () => {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'daysSinceLastSale' | 'lastSaleDate' | 'reviewedAt'>('daysSinceLastSale');
   const [minSoldFilter, setMinSoldFilter] = useState<number | null>(5);
+  const [showReviewed, setShowReviewed] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
@@ -163,7 +165,7 @@ export const StaleItemsReport: React.FC = () => {
     setEbayData(ebayMap);
   }, []);
 
-  const fetchItems = useCallback(async (minTotalSold?: number) => {
+  const fetchItems = useCallback(async (minTotalSold?: number, includeReviewed?: boolean) => {
     try {
       setLoading(true);
       setError(null);
@@ -172,7 +174,7 @@ export const StaleItemsReport: React.FC = () => {
       const data = await getItemStats({
         staleOnly: false,
         minTotalSold: minTotalSold ?? undefined,
-        excludeReviewed: true,
+        excludeReviewed: !includeReviewed,
       });
       setItems(data);
       setFilteredItems(data);
@@ -197,6 +199,11 @@ export const StaleItemsReport: React.FC = () => {
       filtered = filtered.filter(
         (item) => item.daysSinceLastSale <= thresholdFilter
       );
+    }
+
+    // When showReviewed is on, show ONLY reviewed items
+    if (showReviewed) {
+      filtered = filtered.filter((item) => !!item.reviewedAt);
     }
 
     // Apply sorting
@@ -231,19 +238,28 @@ export const StaleItemsReport: React.FC = () => {
     prevSearchTermRef.current = searchTerm;
     prevThresholdFilterRef.current = thresholdFilter;
     prevSortByRef.current = sortBy;
-  }, [searchTerm, thresholdFilter, items, sortBy]);
+  }, [searchTerm, thresholdFilter, items, sortBy, showReviewed]);
 
   const handleThresholdChange = (event: SelectChangeEvent<StaleThreshold | 'all'>) => {
     setThresholdFilter(event.target.value as StaleThreshold | 'all');
   };
 
-  const handleMarkReviewed = async (itemId: string) => {
-    await markItemReviewed(itemId);
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === itemId ? { ...item, reviewedAt: new Date() } : item
-      )
-    );
+  const handleToggleReviewed = async (itemId: string, isCurrentlyReviewed: boolean) => {
+    if (isCurrentlyReviewed) {
+      await unmarkItemReviewed(itemId);
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === itemId ? { ...item, reviewedAt: undefined } : item
+        )
+      );
+    } else {
+      await markItemReviewed(itemId);
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === itemId ? { ...item, reviewedAt: new Date() } : item
+        )
+      );
+    }
   };
 
   const handlePriceCheck = (item: ItemStats) => {
@@ -557,9 +573,16 @@ export const StaleItemsReport: React.FC = () => {
             <MenuItem value={20}>&gt;20 sold</MenuItem>
           </Select>
         </FormControl>
+        <Chip
+          label={showReviewed ? 'Showing Reviewed' : 'Show Reviewed'}
+          color={showReviewed ? 'success' : 'default'}
+          onClick={() => setShowReviewed((prev) => !prev)}
+          clickable
+          variant={showReviewed ? 'filled' : 'outlined'}
+        />
         <Button
           variant="contained"
-          onClick={() => fetchItems(minSoldFilter ?? undefined)}
+          onClick={() => fetchItems(minSoldFilter ?? undefined, showReviewed)}
           disabled={loading}
           sx={{ ml: 2 }}
         >
@@ -697,10 +720,10 @@ export const StaleItemsReport: React.FC = () => {
                         </Box>
                       </TableCell>
                       <TableCell align="center">
-                        <Tooltip title={item.reviewedAt ? `Reviewed: ${formatRelativeDate(item.reviewedAt)}` : 'Mark reviewed'}>
+                        <Tooltip title={item.reviewedAt ? `Reviewed: ${formatRelativeDate(item.reviewedAt)} (click to unmark)` : 'Mark reviewed'}>
                           <Checkbox
                             checked={!!item.reviewedAt}
-                            onChange={() => handleMarkReviewed(item.id)}
+                            onChange={() => handleToggleReviewed(item.id, !!item.reviewedAt)}
                             size="small"
                             color={item.reviewedAt ? 'success' : 'default'}
                           />
